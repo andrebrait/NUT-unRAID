@@ -56,6 +56,10 @@ function nut_tooltip_html($value) {
     return nut_html(nut_html($value));
 }
 
+function nut_dev_message_text($message) {
+    return trim(html_entity_decode(strip_tags((string)$message), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+}
+
 function nut_status_rows($name, $ip) {
     $ups = escapeshellarg($name) . '@' . escapeshellarg($ip);
 
