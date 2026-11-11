@@ -1,0 +1,34 @@
+name: Package plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version (YYYY.MM.DD, optionally with a letter suffix)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build Slackware package from source/nut-dw
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}[a-z]?$ ]] || { echo "invalid version: $VERSION"; exit 1; }
+          pkg="nut-plugin-${VERSION}-x86_64-1"
+          tar -C source/nut-dw --owner=0 --group=0 --sort=name -cJf "archive/${pkg}.txz" .
+          (cd archive && md5sum "${pkg}.txz" > "${pkg}.txz.md5")
+          md5=$(cut -d' ' -f1 "archive/${pkg}.txz.md5")
+          sed -i -e "s|<!ENTITY plgNAME .*|<!ENTITY plgNAME   \"${pkg}\">|" \
+                 -e "s|<!ENTITY plgMD5 .*|<!ENTITY plgMD5    \"${md5}\">|" plugin/nut-dw.plg
+          grep -E 'plgNAME|plgMD5' plugin/nut-dw.plg | head -2
+
+      - uses: stefanzweifel/git-auto-commit-action@d0b01107b5db882071f96de5dd4b54961ea93f4c # v7.2.1
+        with:
+          commit_message: "build: package nut-plugin ${{ inputs.version }}"
