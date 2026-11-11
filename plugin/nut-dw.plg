@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "nut-dw">
 <!ENTITY author    "desertwitch">
-<!ENTITY version   "2026.11.11">
+<!ENTITY version   "2026.11.12">
 <!ENTITY launch    "Settings/NUTsettings">
 <!ENTITY gitURL    "https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master">
 <!ENTITY pluginURL "&gitURL;/plugin/&name;.plg">
@@ -18,6 +18,17 @@
 
 <CHANGES>
 ## Network UPS Tools (NUT) for UNRAID
+###2026.11.12
+- important: the plugin now generates the complete NUT configuration from its settings; the manual configuration modes and the configuration editor are gone
+- important: on upgrade your previous configuration files are imported into the settings and custom directive fields; NUT keeps using the previous files until you review the NUT Settings and click Apply, and conflicting directives must be resolved first
+- important: the default upsd admin user (admin/adminpass) is no longer created; set a NUT Admin Username and Password in the NUT Settings to use NUT Commands
+- important: in standalone mode upsd now only listens on 127.0.0.1; netserver mode listens on the configurable NUT Listen Addresses (default 0.0.0.0)
+- new: custom directive fields for nut.conf, ups.conf, upsd.conf, upsd.users, upsmon.conf and upssched.conf
+- new: Auto Config writes the detected UPS into the settings
+- fix: values are quoted and escaped for NUT, invalid settings are rejected when saving and NUT does not start with them
+- fix: UPS names may contain underscores and dots (e.g. ippon_ups)
+- fix: report loudly when the UPS power-off hook cannot be added to rc.6
+- fix: escape UPS data in the WebGUI and show the developer message as plain text
 ###2026.11.11
 - fork: plugin, packages and updates now come from https://github.com/andrebrait/NUT-unRAID
 - fix: restore generated upsmon roles in upsd.users
