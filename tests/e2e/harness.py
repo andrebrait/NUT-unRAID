@@ -76,9 +76,9 @@ def upgrade(root):
     package(packages / plugin)
 
     old.mkdir(parents=True)
-    defaults = (REPO / "source/nut3/usr/local/emhttp/plugins/nut3/default.cfg").read_text()
+    chroot(root, "/sbin/upgradepkg", "--install-new", f"/tmp/nut-e2e-upgrade/{RELEASED}")  # installs its default.cfg
+    defaults = (old / "nut-dw.cfg").read_text()
     (old / "nut-dw.cfg").write_text(defaults.replace('NAME="ups"', 'NAME="upgradeups"').replace('POLL="15"', 'POLL="7"'))
-    chroot(root, "/sbin/upgradepkg", "--install-new", f"/tmp/nut-e2e-upgrade/{RELEASED}")
     chroot(root, "/etc/rc.d/rc.nut", "write_config")  # the old release writes the settings into the NUT files on start
     (old / RELEASED).write_bytes(b"")  # a package the old .plg cached
     (root / "var/log/plugins").mkdir(parents=True, exist_ok=True)
