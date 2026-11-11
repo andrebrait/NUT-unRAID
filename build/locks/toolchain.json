@@ -1,0 +1,392 @@
+[
+  {
+    "name": "binutils",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/binutils-2.47-x86_64-1.txz",
+    "file": "binutils-2.47-x86_64-1.txz",
+    "sha256": "b65c6a5070548305fa53df7c0db71d68fdc9e526a1d5515d8ee61c8f8068936a",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "b1ba3679695d50610f84e2633b34b14c"
+    }
+  },
+  {
+    "name": "gcc",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/gcc-16.2.0-x86_64-2.txz",
+    "file": "gcc-16.2.0-x86_64-2.txz",
+    "sha256": "1f6ec001588897561eca29d1c755beb09970ca1f46e77a221d3ede4c0dd0efe2",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "156ae9f4dab016812015553f575e891b"
+    }
+  },
+  {
+    "name": "gcc-g++",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/gcc-g++-16.2.0-x86_64-2.txz",
+    "file": "gcc-g++-16.2.0-x86_64-2.txz",
+    "sha256": "09354f14cf569ea72f73b488e935ed73ab9ee9c8014e0f0b65ce53841a6be2e5",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "6e1779b614b3b20c81e1f68704acb28c"
+    }
+  },
+  {
+    "name": "glibc",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/glibc-2.44-x86_64-7.txz",
+    "file": "glibc-2.44-x86_64-7.txz",
+    "sha256": "00dfe07860e8834e89c385dbccd4dfe483c026efcb08326a0562e6bdf4adb60f",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "c06a8cb3be62cad3b97b12d065c2c9ce"
+    }
+  },
+  {
+    "name": "kernel-headers",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/kernel-headers-6.18.52-x86-1.txz",
+    "file": "kernel-headers-6.18.52-x86-1.txz",
+    "sha256": "b6857e6bb98f0dab1685fba1e7b34591b9fc049f354cde2d147ab6072fc4764b",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "signature_url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/kernel-headers-6.18.52-x86-1.txz.asc",
+      "signature_sha256": "6e36ad89631a14c91adb16939049cf0a64c0e1930e1bf5be3f2e0fc959c02ab3"
+    }
+  },
+  {
+    "name": "make",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/make-4.4.1-x86_64-2.txz",
+    "file": "make-4.4.1-x86_64-2.txz",
+    "sha256": "0269bbfa440f4ffa061390e50b0bd94b0813ca3947970c18f5830b3524e701ca",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "6bf8b7cef2142f4564649bc439ad0fff"
+    }
+  },
+  {
+    "name": "autoconf",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/autoconf-2.73-noarch-2.txz",
+    "file": "autoconf-2.73-noarch-2.txz",
+    "sha256": "951b4ad71b4c2606e539e9ab0cc4c41cd72472dcb0759be2b9aadea0006d2539",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "d28d020a2b97dc96071aae3b2155f129"
+    }
+  },
+  {
+    "name": "automake",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/automake-1.18.1-noarch-2.txz",
+    "file": "automake-1.18.1-noarch-2.txz",
+    "sha256": "f1ea1e5070392de141c4bca6f82f3638eb3d4bfdb675b791050b89eb1846d317",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "b15b7bbba732efdc149d4a16b4d6e007"
+    }
+  },
+  {
+    "name": "libtool",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/libtool-2.6.2-x86_64-2.txz",
+    "file": "libtool-2.6.2-x86_64-2.txz",
+    "sha256": "35e88814a99fee0314ad191a77c7a873b85423fc4a7307b7a14503318523320a",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "3e4c21561dd86fa1e0b7fc623ac5ce6a"
+    }
+  },
+  {
+    "name": "m4",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/m4-1.4.21-x86_64-2.txz",
+    "file": "m4-1.4.21-x86_64-2.txz",
+    "sha256": "7d1ee633306e14e34b0005ea31c58fbafe751ad4e1c6808c933b231a789f893f",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "fecc11c925edf89266f755526fa6f91b"
+    }
+  },
+  {
+    "name": "pkgconf",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/pkgconf-3.0.10-x86_64-1.txz",
+    "file": "pkgconf-3.0.10-x86_64-1.txz",
+    "sha256": "24712a46d32feab453fe36feb63d9feb54e8985715ff2cf1f8e5f289e17863a6",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "0f7dce37f1bc500e81e0d3ac51d59e63"
+    }
+  },
+  {
+    "name": "perl",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/perl-5.44.0-x86_64-2.txz",
+    "file": "perl-5.44.0-x86_64-2.txz",
+    "sha256": "51401f87e6f03a2b95845c3ca1747fbe5984185695f41c81af2c469210130713",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "c36947f398dad4d9c3aa0270809ab813"
+    }
+  },
+  {
+    "name": "python3",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/python3-3.12.14-x86_64-2.txz",
+    "file": "python3-3.12.14-x86_64-2.txz",
+    "sha256": "3d3f24047cd93c048ae324ea2277db4ec1e92a03b355407eb530bc05da7b2fa8",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "c708f75555a858a189c1636bc816fdb6"
+    }
+  },
+  {
+    "name": "gmp",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/gmp-6.3.0-x86_64-2.txz",
+    "file": "gmp-6.3.0-x86_64-2.txz",
+    "sha256": "3d07965c79e14cc95b373d16e47000d47243d8d7b3fcaebe75d6b42095e7ab24",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "9447abaa5673e458ed81b00775ac7eda"
+    }
+  },
+  {
+    "name": "mpfr",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/mpfr-4.2.2-x86_64-2.txz",
+    "file": "mpfr-4.2.2-x86_64-2.txz",
+    "sha256": "e7892cd2a31cb61620a2a7b2459c50a7b00012817afd96c70c9dede7162a3a8a",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "8100f3a7e2445c2a400278febe2e4cfa"
+    }
+  },
+  {
+    "name": "libmpc",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/libmpc-1.4.1-x86_64-2.txz",
+    "file": "libmpc-1.4.1-x86_64-2.txz",
+    "sha256": "3c460391a11be205d21cd494ebf81836a9808ceb7057921fe287c50bc2e376d3",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "220259174f66df3d503cf8dc70e3adcf"
+    }
+  },
+  {
+    "name": "isl",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/isl-0.28-x86_64-2.txz",
+    "file": "isl-0.28-x86_64-2.txz",
+    "sha256": "dd44e422f7fc7b52f1fd4cdb66944932b6ff8bf03af6d5c0cdc9731e9173a579",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "76ee55fd28ded2cc38cd2388c7173d29"
+    }
+  },
+  {
+    "name": "zlib",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/zlib-1.4-x86_64-1.txz",
+    "file": "zlib-1.4-x86_64-1.txz",
+    "sha256": "c12aa1c2e68fa0741027d486ab937a55637a888cf0afe4bc2dc3f815910cd0bb",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "935c3a9419da57b333f33d65c8c8e294"
+    }
+  },
+  {
+    "name": "zstd",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/zstd-1.5.7-x86_64-4.txz",
+    "file": "zstd-1.5.7-x86_64-4.txz",
+    "sha256": "40f943ae0c3182598b00296354772bcd91ffdae4b1f73dc72fe16db90bed195e",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "17543d5026318e45fd666f2b96d586b4"
+    }
+  },
+  {
+    "name": "xz",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/a/xz-5.8.4-x86_64-1.txz",
+    "file": "xz-5.8.4-x86_64-1.txz",
+    "sha256": "26389fd03235910aeb4a6f3ccb840c1d411033d078d96e0254699aea1c6f6216",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "d329d4aa92814fcbb5984638628fe1f7"
+    }
+  },
+  {
+    "name": "gzip",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/a/gzip-1.15-x86_64-1.txz",
+    "file": "gzip-1.15-x86_64-1.txz",
+    "sha256": "591600a5cd0e0834f0138a9143e52a77f93b5f1d76ea3e3716b2ee776402e176",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "078eef9f3b5b08987c3a8a67f6e4a33c"
+    }
+  },
+  {
+    "name": "libffi",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/libffi-3.8.0-x86_64-2.txz",
+    "file": "libffi-3.8.0-x86_64-2.txz",
+    "sha256": "8e72a4b5b05ece0e8c4043ef6bb9538e6612c3eada77d96a7cb51aaaf9dc7447",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "1921ea0c4b3fdb007a67d395f299259d"
+    }
+  },
+  {
+    "name": "pcre2",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/pcre2-10.49-x86_64-1.txz",
+    "file": "pcre2-10.49-x86_64-1.txz",
+    "sha256": "3efe839a3fbb05bd6cb9bf2ef45a6d13b9f05724de15726481782a59fc61d051",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "85402d2c3231ca8cc9cf683328b45ecc"
+    }
+  },
+  {
+    "name": "util-linux",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/a/util-linux-2.42.4-x86_64-4.txz",
+    "file": "util-linux-2.42.4-x86_64-4.txz",
+    "sha256": "e174f898b96f88130070b9dbee201d68da0083114b9df12948955f693d0f57a1",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "bec3c46448528105db34f82e5ac800c0"
+    }
+  },
+  {
+    "name": "glib2",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/glib2-2.90.1-x86_64-1.txz",
+    "file": "glib2-2.90.1-x86_64-1.txz",
+    "sha256": "265121504db4e234de452f482155820a41258a9df11c65c394fe32c587b722f3",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "304011a19b698eb11a7f5a2e19b765e5"
+    }
+  },
+  {
+    "name": "libusb",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/libusb-1.0.30-x86_64-2.txz",
+    "file": "libusb-1.0.30-x86_64-2.txz",
+    "sha256": "940ef2ecefe6e9410b8ed7bbe454c2d4d07117cf6f06717330a215d384e080a0",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "a65c761e3267638b9ee185519f9c7ed9"
+    }
+  },
+  {
+    "name": "openssl",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/n/openssl-3.5.9-x86_64-1.txz",
+    "file": "openssl-3.5.9-x86_64-1.txz",
+    "sha256": "b3ee699a2df5fff166ca94c787e18e193069a807f1f81a1502c581db7797cce9",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "199a04458b5d78c5fb56ef6c5ae043d2"
+    }
+  },
+  {
+    "name": "guile",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/guile-3.0.11-x86_64-2.txz",
+    "file": "guile-3.0.11-x86_64-2.txz",
+    "sha256": "de5dc7e972ece2ea879b936e7cb7c2973b81b5b810949fb4aa4021d0696c0c03",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "signature_url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/guile-3.0.11-x86_64-2.txz.asc",
+      "signature_sha256": "ffbb0d6d286394759b7fef00bf5b4c419c184cfce9e71bdcd7425c79597498c2"
+    }
+  },
+  {
+    "name": "gc",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/gc-8.2.12-x86_64-2.txz",
+    "file": "gc-8.2.12-x86_64-2.txz",
+    "sha256": "31bb0d8b208c89d82f6a184c08105cb8806b7421b048567c2d9fa5d9656b3a72",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "0bfcc6a996725b9155cb773ba3938447"
+    }
+  },
+  {
+    "name": "libunistring",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/libunistring-1.5-x86_64-1.txz",
+    "file": "libunistring-1.5-x86_64-1.txz",
+    "sha256": "a0ed8d953fecd6ec15e0713ed86b1dd394aff0d4c5260ee3738fd19d00af19d3",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "76fe0448e56247c85f62a5babc00ecde"
+    }
+  }
+]

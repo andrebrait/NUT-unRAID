@@ -1,0 +1,12 @@
+   |-----handy-ruler------------------------------------------------------|
+nut: NUT - Network UPS Tools (a collection of ups tools)
+nut:
+nut: The Network UPS Tools is a collection of programs which provide a
+nut: common interface for monitoring and administering UPS hardware. It
+nut: uses a layered approach to connect all the components. Drivers are
+nut: provided for a wide assortment of equipment.
+nut:
+nut: Built from networkupstools/nut master commit 1c4ab78c6 (post-2.8.5)
+nut: against Unraid 7.3.4 by github.com/andrebrait/NUT-unRAID CI.
+nut: Provided for use on Unraid WITHOUT ANY WARRANTIES.
+nut:

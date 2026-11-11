@@ -1,0 +1,88 @@
+#!/bin/bash
+# Network UPS Tools for Unraid, built from a pinned upstream commit.
+# Run by build/nut_build.py inside the sandboxed Unraid development root.
+# Configure flags, install layout and slack-desc text follow desertwitch's
+# nut-2.8.5-x86_64-1stable.ssl31.txz (flags as reported by its `upsd -V`):
+# https://github.com/desertwitch/NUT-unRAID/blob/0dd1395/packages/nut-2.8.5-x86_64-1stable.ssl31.txz (by desertwitch)
+set -euo pipefail
+
+PRGNAM=nut
+: "${VERSION:?}" "${BUILD:?}" "${TAG:?}" "${NUT_VERSION_FORCED:?}" "${NUT_TARBALL:?}" "${AVAHI_TARBALL:?}"
+ARCH=x86_64
+TMP=${TMP:-/tmp/nut-build}
+OUTPUT=${OUTPUT:-/out}
+CWD=$(pwd)
+PKG=$TMP/package-$PRGNAM
+SRC=$TMP/src
+AVAHI=$TMP/avahi-include
+
+rm -rf "$TMP"
+mkdir -p "$PKG" "$SRC" "$AVAHI" "$OUTPUT"
+tar --no-same-owner -xzf "$CWD/$NUT_TARBALL" -C "$SRC" --strip-components=1
+# Unraid ships the avahi libraries without headers; nut-scanner dlopen()s them at runtime.
+tar --no-same-owner -xzf "$CWD/$AVAHI_TARBALL" -C "$AVAHI" --strip-components=1 \
+  --wildcards '*/avahi-common/*.h' '*/avahi-client/*.h'
+
+cd "$SRC"
+export NUT_VERSION_FORCED NUT_VERSION_FORCED_SEMVER=2.8.5
+./autogen.sh
+
+CFLAGS="-O2 -fPIC -march=x86-64 -mtune=generic" \
+CXXFLAGS="-O2 -fPIC -march=x86-64 -mtune=generic" \
+./configure \
+  --build=x86_64-slackware-linux \
+  --prefix=/usr \
+  --libdir=/usr/lib64 \
+  --libexecdir=/usr/libexec/nut \
+  --sbindir=/usr/sbin \
+  --sysconfdir=/etc/nut \
+  --localstatedir=/var \
+  --datadir=/usr/share/nut \
+  --mandir=/usr/man \
+  --docdir=/usr/doc/$PRGNAM-$VERSION \
+  --disable-static \
+  --enable-option-checking=fatal \
+  --with-all \
+  --with-neon=no \
+  --with-ipmi=no \
+  --with-powerman=no \
+  --with-linux-i2c=no \
+  --with-gpio=no \
+  --with-cgi=no \
+  --with-nut_monitor=no \
+  --with-pynut=no \
+  --with-docs=no \
+  --enable-docs-changelog=no \
+  --with-ssl=no \
+  --with-nss=no \
+  --with-openssl=no \
+  --with-wrap=no \
+  --with-libsystemd=no \
+  --with-augeas-lenses-dir=no \
+  --with-avahi-includes="-I$AVAHI" \
+  --with-avahi-libs="-lavahi-client -lavahi-common" \
+  --with-user=root \
+  --with-group=root \
+  --with-cgipath=/var/www/nut-cgi-bin \
+  --with-htmlpath=/var/www/nut \
+  --with-drvpath=/usr/libexec/nut \
+  --with-statepath=/var/run/nut \
+  --with-pidpath=/var/run/nut \
+  --with-altpidpath=/var/run/nut \
+  --with-udev-dir=/lib/udev
+
+make -j"$(nproc)"
+make install DESTDIR="$PKG"
+
+install -D -m 0755 scripts/misc/nut.bash_completion "$PKG/usr/share/bash-completion/completions/nut"
+install -d -m 0770 "$PKG/var/run/nut" "$PKG/var/state/ups"
+find "$PKG" -name '*.la' -delete
+find "$PKG" -type f \( -perm -u+x -o -name '*.so*' \) -exec strip --strip-unneeded {} + 2>/dev/null || true
+
+mkdir -p "$PKG/usr/doc/$PRGNAM-$VERSION" "$PKG/install"
+cp -a AUTHORS COPYING INSTALL.nut.adoc LICENSE-DCO LICENSE-GPL2 LICENSE-GPL3 MAINTAINERS NEWS.adoc \
+  README.adoc SECURITY.md TODO.adoc UPGRADING.adoc "$PKG/usr/doc/$PRGNAM-$VERSION/"
+cat "$CWD/slack-desc" > "$PKG/install/slack-desc"
+
+cd "$PKG"
+/sbin/makepkg -l y -c n "$OUTPUT/$PRGNAM-$VERSION-$ARCH-$BUILD$TAG.txz"
