@@ -130,7 +130,7 @@ test.describe('Import of a previous configuration', () => {
   const banner = (page) => page.locator('div.red-text', { hasText: 'Your previous NUT configuration was imported' });
   const problems = (page) => page.locator('div.red-text', { hasText: 'These settings cannot be applied' });
 
-  test('shows the import banner and Apply accepts the imported settings', async ({ page }) => {
+  test('shows the import banner and Apply accepts the imported settings as they are', async ({ page }) => {
     stageLegacy('legacy-default');
     const legacyUsers = root.read(`${FLASH}/ups/upsd.users`);
     await page.goto(SETTINGS);
@@ -139,8 +139,8 @@ test.describe('Import of a previous configuration', () => {
     await expect(banner(page)).toContainText('Standalone mode now keeps upsd local');
     await expect(problems(page)).toHaveCount(0);
 
-    // Apply stays disabled until a field changes (see the next test): signal a change without making one
-    await field(page, 'CUSTOM_NUT').dispatchEvent('input');
+    // Unraid disables Apply until a field changes; a pending import must be applicable as it is
+    await expect(page.locator('#btnApply')).toBeEnabled();
     await apply(page);
     await expect(banner(page)).toHaveCount(0);
     expect(root.exists(`${FLASH}/import-report.json`)).toBe(false);
@@ -148,17 +148,6 @@ test.describe('Import of a previous configuration', () => {
     for (const name of NUT_FILES) expect(files[name].startsWith(MARK), name).toBe(true);
     expect(root.read(`${FLASH}/backup/upsd.users.bak`)).toBe(legacyUsers);
     expect(root.read(`${FLASH}/backup/legacy/upsd.users`)).toBe(legacyUsers);
-  });
-
-  test('Apply can be clicked right away to accept an import', async ({ page }) => {
-    // Plugin bug: the import banner (NUTsettings.page:73) asks to review the settings and click Apply, but
-    // Unraid disables every Apply button until a field of its form changes (webgui BodyInlineJS.php) and the
-    // page does not enable it while an import is pending, so a clean import cannot be accepted without an edit.
-    test.fail(true, 'NUTsettings.page leaves Apply disabled while an import awaits review');
-    stageLegacy('legacy-default');
-    await page.goto(SETTINGS);
-    await expect(banner(page)).toBeVisible();
-    await expect(page.locator('#btnApply')).toBeEnabled({ timeout: 5_000 });
   });
 
   test('lists import conflicts and applies once they are resolved', async ({ page }) => {
