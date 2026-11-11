@@ -16,9 +16,6 @@ on:
         description: Verify the newest release only; no commit, no issue
         type: boolean
         default: false
-  push:
-    # Pre-merge proof: workflow_dispatch needs the default branch, so pushes here run as a dry run.
-    branches: [release-watch]
 
 permissions:
   contents: read
@@ -30,7 +27,7 @@ concurrency:
 env:
   # Discovery script pin; must equal the unraid-build-root pin in native-nut.yml.
   NERDTOOLS_REF: 2c8cd4c41bc7f378b7fdba2bc20019aa52b5ca16
-  DRY_RUN: ${{ github.event_name == 'push' || inputs.dry_run == true }}
+  DRY_RUN: ${{ inputs.dry_run == true }}
 
 jobs:
   discover:
