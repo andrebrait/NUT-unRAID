@@ -3,23 +3,27 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "nut-dw">
 <!ENTITY author    "desertwitch">
-<!ENTITY version   "2026.11.13">
+<!ENTITY version   "2026.11.14">
 <!ENTITY launch    "Settings/NUTsettings">
 <!ENTITY gitURL    "https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master">
 <!ENTITY pluginURL "&gitURL;/plugin/&name;.plg">
 <!ENTITY pkgURL    "&gitURL;/packages">
 <!ENTITY plgPATH   "/boot/config/plugins/&name;">
-<!ENTITY plgNAME   "nut-plugin-2026.11.13-x86_64-1">
-<!ENTITY plgMD5    "5323cf3027aaed99f3ab3f0b58fc6e15">
+<!ENTITY plgNAME   "nut-plugin-2026.11.14-x86_64-1">
+<!ENTITY plgMD5    "73f45162dab54596c9389acf9eec7a0e">
 <!ENTITY nutNAME   "nut-2.8.5.1711_g1c4ab78c6-x86_64-2_andrebrait">
 <!ENTITY nutMD5    "c9109f45b7240ed720aa22143cd1e3f9">
 <!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
 ]>
 
-<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" support="https://forums.unraid.net/topic/60217-plugin-nut-v2-network-ups-tools/">
+<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" support="https://github.com/andrebrait/NUT-unRAID/issues" min="7.3.4">
 
 <CHANGES>
 ## Network UPS Tools (NUT) for UNRAID
+###2026.11.14
+- important: the plugin now requires Unraid 7.3.4 or newer; older Unraid releases only had NUT builds affected by CVE-2026-54161
+- fix: Apply can now be clicked right away to accept an imported configuration
+- fix: the plugin package's install script now runs again (since 2026.11.11 it was skipped, so fresh installs lacked the nut group and default settings)
 ###2026.11.13
 - security: on Unraid 7.3.4 and newer, the default and preview backends are now NUT built in GitHub Actions from upstream master commit 1c4ab78c6, which includes the fixes for CVE-2026-54161 (upsmon NOTIFYCMD command injection) and CVE-2026-85068 (blazer_usb) and the libusb reconnect hang fix (networkupstools/nut#3448)
 - note: NOTIFYCMD and CMDSCRIPT are now run directly as a single program path, not through a shell; arguments or shell syntax in those settings no longer work
@@ -590,19 +594,7 @@ exit 0
 </INLINE>
 </FILE>
 
-<!-- slack15.1 preview (Unraid before 7.3.4) -->
-<FILE Name="&plgPATH;/nut-2.8.5-x86_64-1master.ssl31.txz" Min="6.13" Max="7.3.3.99">
-<URL>&pkgURL;/nut-2.8.5-x86_64-1master.ssl31.txz</URL>
-<MD5>59a93b0f7653d23e4323c2261b1f1429</MD5>
-</FILE>
-
-<!-- slack15.1 default (Unraid before 7.3.4) -->
-<FILE Name="&plgPATH;/nut-2.8.5-x86_64-1stable.ssl31.txz" Min="6.13" Max="7.3.3.99">
-<URL>&pkgURL;/nut-2.8.5-x86_64-1stable.ssl31.txz</URL>
-<MD5>59a93b0f7653d23e4323c2261b1f1429</MD5>
-</FILE>
-
-<!-- Unraid 7.3.4+ default and preview: built by .github/workflows/native-nut.yml from a pinned NUT master commit -->
+<!-- default and preview: built by .github/workflows/native-nut.yml from a pinned NUT master commit -->
 <FILE Name="&plgPATH;/&nutNAME;.txz" Min="7.3.4">
 <URL>&pkgURL;/&nutNAME;.txz</URL>
 <MD5>&nutMD5;</MD5>
@@ -630,13 +622,8 @@ exit 0
 <FILE Min="6.13" Run="/bin/bash">
 <INLINE>
 CONFIG=&plgPATH;/&name;.cfg
-DEFAULTPKG=&plgPATH;/nut-2.8.5-x86_64-1stable.ssl31.txz
-PREVIEWPKG=&plgPATH;/nut-2.8.5-x86_64-1master.ssl31.txz
-# Only downloaded on Unraid 7.3.4 or newer, where it replaces both 2.8.5 builds.
-if [ -f "&plgPATH;/&nutNAME;.txz" ]; then
-    DEFAULTPKG=&plgPATH;/&nutNAME;.txz
-    PREVIEWPKG=&plgPATH;/&nutNAME;.txz
-fi
+DEFAULTPKG=&plgPATH;/&nutNAME;.txz
+PREVIEWPKG=&plgPATH;/&nutNAME;.txz
 if [ -e "$CONFIG" ]; then
     source "$CONFIG"
     if [ "$BACKEND" == "preview" ]; then
@@ -666,110 +653,15 @@ echo ""
 </INLINE>
 </FILE>
 
-<!-- slack15.0 preview -->
-<FILE Name="&plgPATH;/nut-2.8.5-x86_64-1master.ssl11.txz" Min="6.10" Max="6.12.99">
-<URL>&pkgURL;/nut-2.8.5-x86_64-1master.ssl11.txz</URL>
-<MD5>88f5d8d11508a76f123fe279979ad65e</MD5>
-</FILE>
-
-<!-- slack15.0 default -->
-<FILE Name="&plgPATH;/nut-2.8.5-x86_64-1stable.ssl11.txz" Min="6.10" Max="6.12.99">
-<URL>&pkgURL;/nut-2.8.5-x86_64-1stable.ssl11.txz</URL>
-<MD5>88f5d8d11508a76f123fe279979ad65e</MD5>
-</FILE>
-
-<!-- slack15.0 previous -->
-<FILE Name="&plgPATH;/nut-2.8.4-x86_64-1stable.ssl11.txz" Min="6.10" Max="6.12.99">
-<URL>&pkgURL;/nut-2.8.4-x86_64-1stable.ssl11.txz</URL>
-<MD5>b2be0035defeb62db11304752e80223b</MD5>
-</FILE>
-
-<!-- slack15.0 stable -->
-<FILE Name="&plgPATH;/nut-2.8.3-x86_64-2stable.ssl11.txz" Min="6.10" Max="6.12.99">
-<URL>&pkgURL;/nut-2.8.3-x86_64-2stable.ssl11.txz</URL>
-<MD5>9c2325611e2e76cb2ef318bc5ed41551</MD5>
-</FILE>
-
-<!-- slack15.0 legacy -->
-<FILE Name="&plgPATH;/nut-2.7.4.20200318-x86_64-1.txz" Min="6.10" Max="6.12.99">
-<URL>&pkgURL;/nut-2.7.4.20200318-x86_64-1.txz</URL>
-<MD5>52de2867d6b8f6bc1a98a45870b05420</MD5>
-</FILE>
-
-<!-- slack15.0 backend switch -->
-<FILE Min="6.10" Max="6.12.99" Run="/bin/bash">
-<INLINE>
-CONFIG=&plgPATH;/&name;.cfg
-if [ -e "$CONFIG" ]; then
-    source "$CONFIG"
-    if [ "$BACKEND" == "preview" ]; then
-        echo "Installing user-configured PREVIEW backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.8.5-x86_64-1master.ssl11.txz
-    elif [ "$BACKEND" == "default" ]; then
-        echo "Installing DEFAULT backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.8.5-x86_64-1stable.ssl11.txz
-    elif [ "$BACKEND" == "previous" ]; then
-        echo "Installing user-configured PREVIOUS backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.8.4-x86_64-1stable.ssl11.txz
-    elif [ "$BACKEND" == "stable" ]; then
-        echo "Installing user-configured STABLE backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.8.3-x86_64-2stable.ssl11.txz
-    elif [ "$BACKEND" == "legacy" ]; then
-        echo "Installing user-configured LEGACY backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.7.4.20200318-x86_64-1.txz
-    else
-        echo "Installing DEFAULT backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.8.5-x86_64-1stable.ssl11.txz
-    fi
-else
-    echo "Installing DEFAULT backend for NUT..."
-    upgradepkg --install-new &plgPATH;/nut-2.8.5-x86_64-1stable.ssl11.txz
-fi
-echo ""
-</INLINE>
-</FILE>
-
-<!-- default backends for legacy systems -->
-<FILE Name="&plgPATH;/nut-2.7.4.20200318-x86_64-1.txz" Min="6.8" Max="6.9.99" Run="upgradepkg --install-new">
-<URL>&pkgURL;/nut-2.7.4.20200318-x86_64-1.txz</URL>
-<MD5>52de2867d6b8f6bc1a98a45870b05420</MD5>
-</FILE>
-
-<FILE Name="&plgPATH;/nut-2.7.4.20181125-x86_64-1.txz" Min="6.5" Max="6.7.99" Run="upgradepkg --install-new">
-<URL>&pkgURL;/nut-2.7.4.20181125-x86_64-1.txz</URL>
-<MD5>a46d656085991e02a605786007412d76</MD5>
-</FILE>
-
-<FILE Name="&plgPATH;/nut-2.7.4.20171129-x86_64-1.txz" Min="6.1" Max="6.4.99" Run="upgradepkg --install-new">
-<URL>&pkgURL;/nut-2.7.4.20171129-x86_64-1.txz</URL>
-<MD5>24702ef930855db3432ed9ee73e93d42</MD5>
-</FILE>
-
-
 <!-- dependency packages -->
 <FILE Name="&plgPATH;/net-snmp-5.9.4-x86_64-1.txz" Min="6.13" Run="upgradepkg --install-new">
 <URL>&pkgURL;/net-snmp-5.9.4-x86_64-1.txz</URL>
 <MD5>df3f30cdb8680f79ca8f2d1ecf77a156</MD5>
 </FILE>
 
-<FILE Name="&plgPATH;/net-snmp-5.9.3-x86_64-1.txz" Min="6.10" Max="6.12.99" Run="upgradepkg --install-new">
-<URL>&pkgURL;/net-snmp-5.9.3-x86_64-1.txz</URL>
-<MD5>5beebc819894c94bedbc531d47cfe497</MD5>
-</FILE>
-
-<FILE Name="&plgPATH;/net-snmp-5.7.3-x86_64-4.txz" Min="6.1" Max="6.9.99" Run="upgradepkg --install-new">
-<URL>&pkgURL;/net-snmp-5.7.3-x86_64-4.txz</URL>
-<MD5>b9ef68216b97cb5f0bcd9f3312e5941e</MD5>
-</FILE>
-
 <FILE Name="&plgPATH;/libmodbus-3.1.11-x86_64-1nut_slack15.1.txz" Min="6.13" Run="upgradepkg --install-new">
 <URL>&pkgURL;/libmodbus-3.1.11-x86_64-1nut_slack15.1.txz</URL>
 <MD5>dc31cd937d3ad7eb7c9280121a45f9b6</MD5>
-</FILE>
-
-<FILE Name="&plgPATH;/libmodbus-3.1.11-x86_64-1nut_slack15.0.txz" Min="6.10" Max="6.12.99" Run="upgradepkg --install-new">
-<URL>&pkgURL;/libmodbus-3.1.11-x86_64-1nut_slack15.0.txz</URL>
-<MD5>d4cdcea511875dd99e155a65688dce73</MD5>
 </FILE>
 
 <!-- plugin package -->

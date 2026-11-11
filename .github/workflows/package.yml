@@ -22,7 +22,9 @@ jobs:
         run: |
           [[ "$VERSION" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}[a-z]?$ ]] || { echo "invalid version: $VERSION"; exit 1; }
           pkg="nut-plugin-${VERSION}-x86_64-1"
-          tar -C source/nut-dw --owner=0 --group=0 --sort=name -cJf "archive/${pkg}.txz" .
+          # installpkg only runs install/doinst.sh when members are named like makepkg's ("install/...", not "./install/...").
+          tar -C source/nut-dw --owner=0 --group=0 --sort=name --transform='s,^\./\(.\),\1,' -cJf "archive/${pkg}.txz" .
+          tar -tJf "archive/${pkg}.txz" | grep -qx 'install/doinst.sh'
           (cd archive && md5sum "${pkg}.txz" > "${pkg}.txz.md5")
           md5=$(cut -d' ' -f1 "archive/${pkg}.txz.md5")
           sed -i -e "s|<!ENTITY plgNAME .*|<!ENTITY plgNAME   \"${pkg}\">|" \

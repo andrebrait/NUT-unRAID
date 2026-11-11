@@ -1340,6 +1340,10 @@ $(function() {
     });
 
     $('#btnApply').click(applySettings);
+<?if ($nut_mc_pending):?>
+    // Unraid disables Apply until the form changes; an imported configuration must be applicable as is. Runs after the layout's own ready handler.
+    setTimeout(function() { $('#btnApply').prop('disabled', false); });
+<?endif;?>
 
     $('#DRIVER').change(checkNUTsettings);
     $('#SHUTDOWN').change(checkNUTsettings);
