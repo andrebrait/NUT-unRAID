@@ -133,8 +133,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
                 $URversion = parse_ini_file('/etc/unraid-version')['version'];
                 if(isset($URversion) && $URversion) {
                     if (version_compare($URversion, '6.12.99', '>')) {
-                        echo(mk_option($nut_backend, "preview", "preview (latest build)"));
-                        echo(mk_option($nut_backend, "default", "default (2.8.5 stable)"));
+                        $nut_patched = version_compare($URversion, '7.3.4', '>=');
+                        echo(mk_option($nut_backend, "preview", $nut_patched ? "preview (same as default)" : "preview (latest build)"));
+                        echo(mk_option($nut_backend, "default", $nut_patched ? "default (2.8.5+ with security fixes)" : "default (2.8.5 stable)"));
                         echo(mk_option($nut_backend, "previous", "previous (2.8.4 stable)"));
                         echo(mk_option($nut_backend, "stable", "release (2.8.3 stable)"));
                         echo(mk_option($nut_backend, "legacy", "legacy (2.7.4 w/o SNMP)"));
