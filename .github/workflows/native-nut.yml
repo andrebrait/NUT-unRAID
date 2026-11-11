@@ -1,0 +1,139 @@
+name: Native NUT package
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Commit the verified package and .md5 to packages/ on the dispatched branch
+        type: boolean
+        default: false
+  push:
+    paths:
+      - .github/workflows/native-nut.yml
+      - build/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-nut-${{ github.ref }}
+
+# Never upload or cache the Unraid image or the extracted roots.
+env:
+  # Must equal the unraid-build-root action pin below; bootstrap/sandbox modules are reused from it.
+  NERDTOOLS_REF: 2c8cd4c41bc7f378b7fdba2bc20019aa52b5ca16
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      package: ${{ steps.build.outputs.package }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: andrebrait/unRAID-NerdTools
+          ref: ${{ env.NERDTOOLS_REF }}
+          path: .nerdtools
+          sparse-checkout: build
+          persist-credentials: false
+      - name: Prove the pinned NUT commit contains every required fix merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(jq -r .nut.commit build/nut.json)
+          jq -r '.fixes[] | "\(.merge)\t\(.id)"' build/nut.json | while IFS=$'\t' read -r merge id; do
+            status=$(gh api "repos/networkupstools/nut/compare/${merge}...${commit}" --jq .status)
+            echo "${id}: merge ${merge} -> ${commit}: ${status}"
+            [[ "$status" == ahead || "$status" == identical ]]
+          done
+      - name: Read the build baseline pins
+        id: baseline
+        run: |
+          version=$(jq -r .build_target build/nut.json)
+          jq -r --arg v "$version" '.targets[$v] | "version=\($v)\nurl=\(.url)\nsha256=\(.sha256)\nbzroot=\(.bzroot_sha256)"' build/nut.json >> "$GITHUB_OUTPUT"
+      - name: Prepare private Unraid baseline and development roots
+        id: roots
+        uses: andrebrait/unRAID-NerdTools/build/unraid-build-root@2c8cd4c41bc7f378b7fdba2bc20019aa52b5ca16
+        with:
+          version: ${{ steps.baseline.outputs.version }}
+          url: ${{ steps.baseline.outputs.url }}
+          sha256: ${{ steps.baseline.outputs.sha256 }}
+          bzroot-sha256: ${{ steps.baseline.outputs.bzroot }}
+          toolchain-lock: build/locks/toolchain.json
+      - name: Configure mapped sandbox identities
+        run: |
+          sudo apt-get install --no-install-recommends --yes bubblewrap uidmap
+          sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 root
+      - name: Build NUT in the sandboxed development root (no network)
+        id: build
+        env:
+          DEVELOPMENT_ROOT: ${{ steps.roots.outputs.development-root }}
+        run: |
+          sudo NERDTOOLS="$PWD/.nerdtools" python3 build/nut_build.py build \
+            --development-root "$DEVELOPMENT_ROOT" --out dist --work "$RUNNER_TEMP"
+          sudo chown -R "$(id -u):$(id -g)" dist
+          package=$(cd dist && ls nut-*.txz)
+          (cd dist && md5sum "$package" > "$package.md5" && cat "$package.md5" && ls -l "$package")
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nut-package
+          path: dist/
+          if-no-files-found: error
+
+  verify:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        unraid: ["7.3.4", "7.4.0"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: andrebrait/unRAID-NerdTools
+          ref: ${{ env.NERDTOOLS_REF }}
+          path: .nerdtools
+          sparse-checkout: build
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nut-package
+          path: dist
+      - name: Install archive tools and configure mapped sandbox identities
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes cpio zstd xz-utils squashfs-tools bubblewrap uidmap
+          sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 root
+      - name: Install with upgradepkg into the exact Unraid ${{ matrix.unraid }} root, resolve ELF dependencies, run -V
+        env:
+          PACKAGE: dist/${{ needs.build.outputs.package }}
+          UNRAID: ${{ matrix.unraid }}
+        run: |
+          sudo NERDTOOLS="$PWD/.nerdtools" python3 build/nut_build.py verify \
+            --target "$UNRAID" --package "$PACKAGE" --work "$RUNNER_TEMP"
+
+  publish:
+    needs: [build, verify]
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nut-package
+          path: packages
+      - uses: stefanzweifel/git-auto-commit-action@d0b01107b5db882071f96de5dd4b54961ea93f4c # v7.2.1
+        with:
+          commit_message: "build: add native ${{ needs.build.outputs.package }}"
+          file_pattern: packages/${{ needs.build.outputs.package }} packages/${{ needs.build.outputs.package }}.md5
