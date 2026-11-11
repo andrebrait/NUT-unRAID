@@ -8,7 +8,7 @@
 
 <p>
   <a href="https://github.com/andrebrait/NUT-unRAID/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/andrebrait/NUT-unRAID/test.yml?branch=master&label=tests" alt="Tests"></a>
-  <a href="https://github.com/andrebrait/NUT-unRAID/tags"><img src="https://img.shields.io/github/v/release/andrebrait/NUT-unRAID?label=release&color=blue" alt="Latest tag"></a>
+  <a href="https://github.com/andrebrait/NUT-unRAID/releases"><img src="https://img.shields.io/github/v/release/andrebrait/NUT-unRAID?label=release&color=blue" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Unraid-7.3.4%2B-e8543f" alt="Supported Unraid versions">
   <a href="LICENSE-GPL2"><img src="https://img.shields.io/badge/license-GPL--2.0%20%2F%20GPL--3.0-green" alt="License: GPL-2.0 or GPL-3.0"></a>
 </p>
