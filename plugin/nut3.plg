@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "nut3">
 <!ENTITY author    "andrebrait">
-<!ENTITY version   "2026.11.15">
+<!ENTITY version   "2026.11.15.1">
 <!ENTITY launch    "Settings/NUTsettings">
 <!ENTITY gitURL    "https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master">
 <!ENTITY pluginURL "&gitURL;/plugin/&name;.plg">
@@ -19,7 +19,9 @@
 <PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" support="https://github.com/andrebrait/NUT-unRAID/issues" min="7.3.4">
 
 <CHANGES>
-## NUT v3 (Network UPS Tools) for UNRAID
+## NUT v3 (Network UPS Tools)
+###2026.11.15.1
+- the plugin is called NUT v3 (Network UPS Tools), without "for UNRAID"
 ###2026.11.15
 - important: the plugin is renamed from nut-dw to nut3 and is now listed as NUT v3 (Network UPS Tools), based on desertwitch's NUT plugin (NUT v2), so it can be told apart from that original. Installing it replaces the nut-dw plugin (the original or an earlier release of this fork) and keeps your settings: they move from /boot/config/plugins/nut-dw to /boot/config/plugins/nut3 and nut-dw.cfg becomes nut3.cfg.
 - note: support now happens in the GitHub issue tracker at https://github.com/andrebrait/NUT-unRAID/issues
@@ -760,7 +762,7 @@ fi
 
 echo ""
 echo "-----------------------------------------------------------"
-echo " NUT v3 (Network UPS Tools) for UNRAID has been installed."
+echo " NUT v3 (Network UPS Tools) has been installed."
 echo " Version: &version; / Plugin Maintainer: &author;"
 echo "-----------------------------------------------------------"
 echo ""
@@ -864,7 +866,7 @@ rm -f /etc/cron.daily/nut-poller >/dev/null 2>&amp;1
 
 echo ""
 echo "-----------------------------------------------------------"
-echo " NUT v3 (Network UPS Tools) for UNRAID has been removed."
+echo " NUT v3 (Network UPS Tools) has been removed."
 echo " Version: &version; / Plugin Maintainer: &author;"
 echo "-----------------------------------------------------------"
 echo ""

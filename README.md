@@ -21,7 +21,7 @@ Installing it replaces the earlier `nut-dw` plugin (NUT v2, the original or an e
 Report bugs and feature requests in the [issue tracker of this fork](https://github.com/andrebrait/NUT-unRAID/issues).
 
 
-NUT v3 (Network UPS Tools) for UNRAID
+NUT v3 (Network UPS Tools)
 ================
 _A refactored, modernized version of the original NUT plugin with a focus on frequent updates._
 
