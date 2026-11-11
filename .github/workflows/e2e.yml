@@ -45,15 +45,17 @@ jobs:
           node-version: 26
           cache: npm
           cache-dependency-path: tests/e2e/package-lock.json
+      # The runner image's Google Chrome already brought Chromium's system libraries, so no --with-deps.
       - name: Install Playwright and Chromium
         working-directory: tests/e2e
         run: |
           npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
       - name: Serve the plugin pages from the exact Unraid ${{ matrix.unraid }} root
         env:
           UNRAID: ${{ matrix.unraid }}
         run: |
+          sudo apt-get update
           sudo apt-get install --no-install-recommends --yes cpio zstd xz-utils squashfs-tools
           sudo NERDTOOLS="$PWD/.nerdtools" python3 tests/e2e/harness.py --work "$E2E_WORK" up --target "$UNRAID"
       - name: Browser tests
