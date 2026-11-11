@@ -1,7 +1,9 @@
 #!/bin/bash
 # Network UPS Tools for Unraid, built from a pinned upstream commit.
-# Run by build/nut_build.py inside the sandboxed Unraid development root;
-# configure flags follow desertwitch's nut-2.8.5 package (see `upsd -V`).
+# Run by build/nut_build.py inside the sandboxed Unraid development root.
+# Configure flags, install layout and slack-desc text follow desertwitch's
+# nut-2.8.5-x86_64-1stable.ssl31.txz (flags as reported by its `upsd -V`):
+# https://github.com/desertwitch/NUT-unRAID/blob/0dd1395/packages/nut-2.8.5-x86_64-1stable.ssl31.txz (by desertwitch)
 set -euo pipefail
 
 PRGNAM=nut
