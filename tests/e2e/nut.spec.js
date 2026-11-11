@@ -9,11 +9,11 @@ const {
 const field = (page, key) => page.locator(`textarea[data-field="${key}"]`);
 
 test('Unraid\'s installpkg runs the plugin package\'s install script', () => {
-  // Plugin bug: .github/workflows/package.yml archives "." so the members are "./install/doinst.sh" and
-  // "./install/slack-desc"; installpkg only knows "install/...", skips the script and shows no description.
-  // harness.py builds the package the same way and then runs the script itself. Remove this mark once fixed.
-  test.fail(true, 'package.yml builds packages whose install script installpkg never runs');
-  expect(sudo(['cat', path.join(WORK, 'install.log')])).toMatch(/Executing install script for nut-plugin-/);
+  // harness.py builds the package as package.yml does and installs it with the root's upgradepkg; installpkg
+  // skips doinst.sh (and the description) when the members are named "./install/..." instead of "install/..."
+  const log = sudo(['cat', path.join(WORK, 'install.log')]);
+  expect(log).toMatch(/Executing install script for nut-plugin-/);
+  expect(log).toContain('# Network UPS Tools (NUT) for UNRAID');
 });
 
 test.describe('NUT Settings', () => {
@@ -139,6 +139,8 @@ test.describe('Import of a previous configuration', () => {
     await expect(banner(page)).toContainText('Standalone mode now keeps upsd local');
     await expect(problems(page)).toHaveCount(0);
 
+    // Apply stays disabled until a field changes (see the next test): signal a change without making one
+    await field(page, 'CUSTOM_NUT').dispatchEvent('input');
     await apply(page);
     await expect(banner(page)).toHaveCount(0);
     expect(root.exists(`${FLASH}/import-report.json`)).toBe(false);
@@ -148,6 +150,17 @@ test.describe('Import of a previous configuration', () => {
     expect(root.read(`${FLASH}/backup/legacy/upsd.users`)).toBe(legacyUsers);
   });
 
+  test('Apply can be clicked right away to accept an import', async ({ page }) => {
+    // Plugin bug: the import banner (NUTsettings.page:73) asks to review the settings and click Apply, but
+    // Unraid disables every Apply button until a field of its form changes (webgui BodyInlineJS.php) and the
+    // page does not enable it while an import is pending, so a clean import cannot be accepted without an edit.
+    test.fail(true, 'NUTsettings.page leaves Apply disabled while an import awaits review');
+    stageLegacy('legacy-default');
+    await page.goto(SETTINGS);
+    await expect(banner(page)).toBeVisible();
+    await expect(page.locator('#btnApply')).toBeEnabled({ timeout: 5_000 });
+  });
+
   test('lists import conflicts and applies once they are resolved', async ({ page }) => {
     stageLegacy('legacy-custom');
     await page.goto(SETTINGS);
@@ -155,11 +168,12 @@ test.describe('Import of a previous configuration', () => {
     await expect(banner(page)).toContainText('Manual configuration mode');
     await expect(problems(page).locator('li')).toHaveCount(6);
 
+    // the user fixes one conflict; Apply still reports the others and writes nothing
+    await field(page, 'CUSTOM_UPS').fill('vendorid = "051D"\ndesc = "Rack UPS 1"');
     const before = flashChecksums();
     await applyRejected(page, 'user [remote] is generated from the settings above', '"NOTIFYFLAG" is set from the settings above');
     expect(flashChecksums()).toEqual(before);
 
-    await field(page, 'CUSTOM_UPS').fill('vendorid = "051D"\ndesc = "Rack UPS 1"');
     await field(page, 'CUSTOM_USERS').fill('[homeassistant]\npassword = ha\nupsmon slave');
     await field(page, 'CUSTOM_UPSMON').fill('NOTIFYFLAG LOWBATT SYSLOG+EXEC\nFINALDELAY 10');
     await apply(page);

@@ -2,11 +2,12 @@
 """Serve the NUT plugin's WebGUI pages from an exact Unraid root, for the browser tests in this directory.
 
 up     Extracts the pinned Unraid image (build/nut.json targets) into WORK/root with NerdTools' bootstrap,
-       installs the NUT backend named by the .plg and a plugin package built from source/nut-dw (the same
-       tar as package.yml) with the root's own upgradepkg, so doinst.sh runs. It then replaces the NUT
-       daemons and clients with fixture-driven stubs (stubs/), writes the state files emhttpd would write,
-       and starts the root's own php-fpm (its own php.ini, so the real CSRF prepend) and nginx, chrooted,
-       on 127.0.0.1:PORT. nginx gets Unraid's routing (rc.nginx locations) without login.
+       links /etc/rc.d as rc.S does at boot, installs the NUT backend named by the .plg and a plugin package
+       built from source/nut-dw (the same tar as package.yml) with the root's own upgradepkg, so doinst.sh
+       runs. It then replaces the NUT daemons and clients with fixture-driven stubs (stubs/), writes the state
+       files emhttpd would write, and starts the root's own rsyslogd, php-fpm (its own php.ini, so the real
+       CSRF prepend) and nginx, chrooted, on 127.0.0.1:PORT. nginx gets Unraid's routing (rc.nginx locations)
+       without login.
 reset  Restores the plugin's flash directory and the stub fixtures to their state right after installation.
 down   Stops every process running in the root, unmounts it and copies the server logs to --logs.
 
@@ -62,8 +63,9 @@ def install(root, work):
     backend = f"{entity('nutNAME')}.txz"
     shutil.copy(REPO / "packages" / backend, packages / backend)
     plugin = f"nut-plugin-{entity('version')}-x86_64-1.txz"
-    # the same tar invocation as .github/workflows/package.yml
-    run(["tar", "-C", REPO / "source/nut-dw", "--owner=0", "--group=0", "--sort=name", "-cJf", packages / plugin, "."])
+    # the same tar invocation as .github/workflows/package.yml (members named like makepkg's, so installpkg runs doinst.sh)
+    run(["tar", "-C", REPO / "source/nut-dw", "--owner=0", "--group=0", "--sort=name", r"--transform=s,^\./\(.\),\1,",
+         "-cJf", packages / plugin, "."])
     (root / FLASH).mkdir(parents=True)  # the .plg creates it before installing the package
     # backend first, plugin last, as the .plg does on 7.3.4+; the log is checked by nut.spec.js
     log = chroot(root, "/sbin/upgradepkg", "--install-new", f"/tmp/nut-e2e-packages/{backend}",
@@ -71,14 +73,6 @@ def install(root, work):
     print(log, flush=True)
     (work / "install.log").write_text(log)
     shutil.rmtree(packages)
-    if f"Executing install script for {plugin}" not in log:
-        # installpkg skipped the plugin's install script (see nut.spec.js); run it as installpkg would,
-        # so the pages are tested on a completely installed plugin
-        print(f"::warning::installpkg did not run the install script of {plugin}; running it", flush=True)
-        shutil.copy(REPO / "source/nut-dw/install/doinst.sh", root / "tmp/doinst.sh")
-        chroot(root, "/bin/sh", "-c", "cd / && sh /tmp/doinst.sh -install && rm /tmp/doinst.sh")
-    # TEMPORARY diagnostics
-    subprocess.run(["chroot", root, "/bin/sh", "-c", "ls -la /etc/rc.d; grep -n 218 /etc/group /etc/passwd; grep -n '^nut:' /etc/group /etc/passwd; ls -la /boot/config/plugins/nut-dw /install"])
 
     for name, directory in STUBS.items():
         shutil.copy(HERE / "stubs" / name, root / directory / name)
@@ -186,6 +180,9 @@ def up(args):
     image = {"url": target["url"], "sha256": target["sha256"], "file": f"unRAIDServer-{args.target}-x86_64.zip"}
     prepare_image(image, args.target, work / "inputs", root, target["bzroot_sha256"])
     shutil.rmtree(work / "inputs")
+    # as rc.S does at boot: /etc/rc.d becomes the /usr layer's rc.d (rc.6, rc.nginx, ...)
+    shutil.rmtree(root / "etc/rc.d")
+    (root / "etc/rc.d").symlink_to("/usr/local/etc/rc.d")
     install(root, work)
     state(root)
     snapshot(root)
