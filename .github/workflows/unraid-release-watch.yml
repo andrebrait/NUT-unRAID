@@ -1,0 +1,147 @@
+name: Unraid release watch
+
+# Daily: find official Unraid releases (stable, beta, rc) at or above the plugin's minimum that the shipped NUT
+# package has not been verified on, verify them with nut-verify.yml (no rebuild), record passes in
+# .github/tested-unraid.json and open one issue per version that fails.
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Verify only this Unraid version (ignores the tested record)
+        type: string
+        default: ""
+      dry_run:
+        description: Verify the newest release only; no commit, no issue
+        type: boolean
+        default: false
+  push:
+    # Pre-merge proof: workflow_dispatch needs the default branch, so pushes here run as a dry run.
+    branches: [release-watch]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unraid-release-watch
+  cancel-in-progress: false
+
+env:
+  # Discovery script pin; must equal the unraid-build-root pin in native-nut.yml.
+  NERDTOOLS_REF: 2c8cd4c41bc7f378b7fdba2bc20019aa52b5ca16
+  DRY_RUN: ${{ github.event_name == 'push' || inputs.dry_run == true }}
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: andrebrait/unRAID-NerdTools
+          ref: ${{ env.NERDTOOLS_REF }}
+          path: .nerdtools
+          sparse-checkout: scripts
+          persist-credentials: false
+      - name: Check the release watch logic
+        run: NERDTOOLS="$PWD/.nerdtools" python3 -m unittest discover -s build -p 'test_release_watch.py' -v
+      - name: Discover official releases with authoritative ZIP SHA256s
+        run: |
+          minimum=$(grep -oP '&nutNAME;\.txz" Min="\K[^"]+' plugin/nut-dw.plg)
+          python3 .nerdtools/scripts/check-unraid-releases.py --baseline "$minimum" --output unraid-releases.json
+      - name: Select releases still to verify
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh issue list --state open --limit 500 --json title > issues.json
+          args=(--report unraid-releases.json --issues issues.json --version "$VERSION")
+          [[ "$DRY_RUN" != true ]] || args+=(--dry-run)
+          matrix=$(NERDTOOLS="$PWD/.nerdtools" python3 build/release_watch.py select "${args[@]}")
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq '.include | length' <<<"$matrix")" >> "$GITHUB_OUTPUT"
+          jq -r '.include[] | "verifying Unraid \(.version) (\(.channel)) \(.sha256)"' <<<"$matrix"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: unraid-releases
+          path: unraid-releases.json
+          if-no-files-found: warn
+
+  verify:
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    name: verify ${{ matrix.version }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    uses: ./.github/workflows/nut-verify.yml
+    with:
+      version: ${{ matrix.version }}
+      url: ${{ matrix.url }}
+      sha256: ${{ matrix.sha256 }}
+
+  report:
+    needs: [discover, verify]
+    if: ${{ !cancelled() && needs.discover.outputs.count != '0' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Collect per-version results from this run's verify jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MATRIX: ${{ needs.discover.outputs.matrix }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --jq '.jobs[]' | jq -s . > jobs.json
+          python3 build/release_watch.py results --matrix "$MATRIX" --jobs jobs.json > results.json
+          jq -r '.[] | "Unraid \(.version): ok=\(.ok) \(.job_url)"' results.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Open one issue per failed version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          package=$(grep -oP '<!ENTITY nutNAME\s+"\K[^"]+' plugin/nut-dw.plg)
+          jq -c '.[] | select(.ok | not)' results.json | while read -r failed; do
+            version=$(jq -r .version <<<"$failed")
+            title="Unraid $version: NUT package verification failed"
+            if gh issue list --state open --limit 500 --json title --jq '.[].title' | grep -Fxq "$title"; then
+              echo "Issue already open: $title"
+              continue
+            fi
+            {
+              echo "The shipped NUT package \`$package\` failed verification on Unraid $version (ZIP SHA256 \`$(jq -r .sha256 <<<"$failed")\`)."
+              echo
+              echo "- Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              echo "- Failed job: $(jq -r .job_url <<<"$failed")"
+              echo
+              echo "Close this issue once fixed; the next daily run re-verifies the version."
+            } > body.md
+            if [[ "$DRY_RUN" == true ]]; then
+              echo "DRY RUN: would open issue: $title"
+            else
+              gh issue create --title "$title" --body-file body.md
+            fi
+          done
+      - name: Record passing versions
+        if: env.DRY_RUN != 'true'
+        run: python3 build/release_watch.py record --results results.json
+      - uses: stefanzweifel/git-auto-commit-action@d0b01107b5db882071f96de5dd4b54961ea93f4c # v7.2.1
+        if: env.DRY_RUN != 'true'
+        with:
+          commit_message: "chore: record Unraid versions verified for the shipped NUT package"
+          file_pattern: .github/tested-unraid.json
