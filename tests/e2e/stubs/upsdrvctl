@@ -1,0 +1,3 @@
+#!/bin/bash
+# Page-test stand-in for NUT's upsdrvctl: there is no UPS to drive.
+exit 0

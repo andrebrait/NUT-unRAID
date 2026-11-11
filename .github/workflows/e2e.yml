@@ -1,0 +1,74 @@
+name: Page tests
+
+on:
+  push:
+    branches-ignore:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+# Never upload or cache the Unraid image or the extracted root; only test results and server logs.
+env:
+  # Same NerdTools commit as native-nut.yml; its bootstrap extracts the exact Unraid root.
+  NERDTOOLS_REF: 2c8cd4c41bc7f378b7fdba2bc20019aa52b5ca16
+  E2E_WORK: /tmp/nut-e2e
+
+jobs:
+  pages:
+    name: Unraid ${{ matrix.unraid }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        unraid: ["7.3.4", "7.4.0"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: andrebrait/unRAID-NerdTools
+          ref: ${{ env.NERDTOOLS_REF }}
+          path: .nerdtools
+          sparse-checkout: build
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - name: Install Playwright and Chromium
+        working-directory: tests/e2e
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Serve the plugin pages from the exact Unraid ${{ matrix.unraid }} root
+        env:
+          UNRAID: ${{ matrix.unraid }}
+        run: |
+          sudo apt-get install --no-install-recommends --yes cpio zstd xz-utils squashfs-tools
+          sudo NERDTOOLS="$PWD/.nerdtools" python3 tests/e2e/harness.py --work "$E2E_WORK" up --target "$UNRAID"
+      - name: Browser tests
+        working-directory: tests/e2e
+        run: npx playwright test
+      - name: Stop the server and collect its logs
+        if: always()
+        run: |
+          sudo python3 tests/e2e/harness.py --work "$E2E_WORK" down --logs tests/e2e/test-results/server-logs || true
+          sudo chown -R "$(id -u):$(id -g)" tests/e2e/test-results || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: page-tests-unraid-${{ matrix.unraid }}
+          path: |
+            tests/e2e/test-results/
+            tests/e2e/playwright-report/
+          if-no-files-found: ignore

@@ -1,0 +1,18 @@
+#!/bin/bash
+# Page-test stand-in for NUT's upsc, installed into the Unraid root by harness.py.
+# Answers from /var/tmp/nut-e2e/upsc.txt ("variable: value" lines); without it, acts like a stopped upsd.
+data=/var/tmp/nut-e2e
+if [ "$1" = -c ]; then
+    cat "$data/upsc-clients.txt" 2>/dev/null
+    exit 0
+fi
+if [ ! -f "$data/upsc.txt" ]; then
+    echo "Error: Connection failure: Connection refused" >&2
+    exit 1
+fi
+if [ -n "$2" ]; then
+    awk -v var="$2" 'index($0, var ": ") == 1 { print substr($0, length(var) + 3); found = 1; exit } END { exit !found }' "$data/upsc.txt" && exit 0
+    echo "Error: Variable not supported by UPS" >&2
+    exit 1
+fi
+cat "$data/upsc.txt"

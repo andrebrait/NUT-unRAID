@@ -1,0 +1,3 @@
+#!/bin/bash
+# Page-test stand-in for NUT's upsd: the pages only talk to upsc and upscmd, which are stubbed too.
+exit 0

@@ -1,0 +1,5 @@
+Instant commands supported on UPS [ups]:
+
+beeper.disable - Disable the UPS beeper
+beeper.enable - Enable the UPS beeper
+test.battery.start.quick - Start a quick battery test

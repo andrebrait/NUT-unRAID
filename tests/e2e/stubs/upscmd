@@ -1,0 +1,9 @@
+#!/bin/bash
+# Page-test stand-in for NUT's upscmd: lists /var/tmp/nut-e2e/upscmd-list.txt and logs every call.
+data=/var/tmp/nut-e2e
+printf '%s\n' "$*" >> "$data/upscmd.log"
+if [ "$1" = -l ]; then
+    cat "$data/upscmd-list.txt"
+else
+    echo OK
+fi

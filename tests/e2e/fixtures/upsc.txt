@@ -1,0 +1,16 @@
+battery.charge: 100
+battery.charge.low: 10
+battery.runtime: 1830
+battery.type: PbAc
+battery.voltage: 13.6
+device.mfr: CPS
+device.model: CP1500PFCLCD
+device.type: ups
+driver.name: usbhid-ups
+input.voltage: 230.0
+output.voltage: 230.0
+ups.load: 23
+ups.mfr: CPS
+ups.model: CP1500PFCLCD
+ups.realpower.nominal: 900
+ups.status: OL

@@ -1,0 +1,11 @@
+#!/bin/bash
+# Page-test stand-in for NUT's upsmon. "-p" starts a daemon that `pgrep -x upsmon` finds (a copy of sleep
+# named upsmon, see harness.py), "-c stop" stops it, anything else succeeds.
+daemon=/usr/libexec/nut-e2e/upsmon
+case "$1 $2" in
+    "-c stop")
+        pkill -f "^$daemon" ;;  # the daemon's command line, never this script's
+    -p*)
+        pgrep -f "^$daemon" >/dev/null || { setsid "$daemon" infinity </dev/null >/dev/null 2>&1 & } ;;
+esac
+exit 0
