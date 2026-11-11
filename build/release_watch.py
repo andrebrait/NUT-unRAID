@@ -53,15 +53,26 @@ def select(candidates, tested, open_titles, package, version=None, dry_run=False
     return [r for r in candidates if not done(r) and issue_title(r["version"]) not in open_titles]
 
 
+VERIFY_STEP = "Install with upgradepkg"
+
+
 def results(matrix, jobs):
-    """Per-version outcome from this run's reusable-workflow jobs, named '<caller job> / verify'."""
+    """Per-version outcome from this run's reusable-workflow jobs, named '<caller job> / verify'.
+
+    Only a failed verification step counts as a failed verification; a runner/apt/artifact failure raises,
+    so it is retried on the next run instead of filing a bogus issue.
+    """
     outcomes = []
     for release in matrix:
-        found = [j for j in jobs if f"verify {release['version']} /" in j["name"] and j["conclusion"] in ("success", "failure")
-                 and j["name"].endswith("/ verify")]
+        found = [j for j in jobs if f"verify {release['version']} /" in j["name"] and j["name"].endswith("/ verify")
+                 and j["conclusion"] in ("success", "failure")]
         if len(found) != 1:
             raise ValueError(f"Expected one finished verify job for {release['version']}, found {len(found)}")
-        outcomes.append({**release, "ok": found[0]["conclusion"] == "success", "job_url": found[0]["html_url"]})
+        job = found[0]
+        failed = [s["name"] for s in job["steps"] if s["conclusion"] == "failure"]
+        if any(not name.startswith(VERIFY_STEP) for name in failed):
+            raise ValueError(f"Unraid {release['version']}: infrastructure failure in {failed}, not a verification result")
+        outcomes.append({**release, "ok": job["conclusion"] == "success", "job_url": job["html_url"]})
     return outcomes
 
 

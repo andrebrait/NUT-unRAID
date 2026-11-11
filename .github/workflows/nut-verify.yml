@@ -60,8 +60,8 @@ jobs:
           path: dist
       - name: Install archive tools and configure mapped sandbox identities
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes cpio zstd xz-utils squashfs-tools bubblewrap uidmap
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install --no-install-recommends --yes cpio zstd xz-utils squashfs-tools bubblewrap uidmap
           sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 root
       - name: Install with upgradepkg into the exact Unraid ${{ inputs.version }} root, resolve ELF dependencies, run -V
         env:

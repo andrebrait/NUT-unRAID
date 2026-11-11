@@ -26,15 +26,20 @@ class SelectTest(unittest.TestCase):
 
 class OutcomeTest(unittest.TestCase):
     def test_results_and_record(self):
-        jobs = [{"name": "verify 7.3.4 / verify", "conclusion": "success", "html_url": "u1"},
-                {"name": "verify 7.4.0 / verify", "conclusion": "failure", "html_url": "u2"},
-                {"name": "discover", "conclusion": "success", "html_url": "u0"}]
+        jobs = [{"name": "verify 7.3.4 / verify", "conclusion": "success", "html_url": "u1", "steps": []},
+                {"name": "verify 7.4.0 / verify", "conclusion": "failure", "html_url": "u2",
+                 "steps": [{"name": "Install with upgradepkg into the exact Unraid 7.4.0 root", "conclusion": "failure"}]},
+                {"name": "verify 7.5.0 / verify", "conclusion": "failure", "html_url": "u3",
+                 "steps": [{"name": "Install archive tools", "conclusion": "failure"}]},
+                {"name": "discover", "conclusion": "success", "html_url": "u0", "steps": []}]
         out = rw.results([R[1], R[2]], jobs)
         self.assertEqual([o["ok"] for o in out], [True, False])
         self.assertEqual(rw.record({}, out, "p", "2026-01-01"),
                          {"7.3.4": {"sha256": "a", "package": "p", "verified": "2026-01-01"}})
         with self.assertRaises(ValueError):
             rw.results([R[0]], jobs)
+        with self.assertRaises(ValueError):  # runner failure is not a verification result
+            rw.results([{"version": "7.5.0", "sha256": "d"}], jobs)
 
 
 if __name__ == "__main__":
