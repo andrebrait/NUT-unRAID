@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "nut-dw">
 <!ENTITY author    "desertwitch">
-<!ENTITY version   "2026.11.12">
+<!ENTITY version   "2026.11.12a">
 <!ENTITY launch    "Settings/NUTsettings">
 <!ENTITY gitURL    "https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master">
 <!ENTITY pluginURL "&gitURL;/plugin/&name;.plg">
@@ -20,7 +20,7 @@
 
 <CHANGES>
 ## Network UPS Tools (NUT) for UNRAID
-###2026.11.12
+###2026.11.12a
 - security: on Unraid 7.3.4 and newer, the default and preview backends are now NUT built in GitHub Actions from upstream master commit 1c4ab78c6, which includes the fixes for CVE-2026-54161 (upsmon NOTIFYCMD command injection) and CVE-2026-85068 (blazer_usb) and the libusb reconnect hang fix (networkupstools/nut#3448)
 - note: NOTIFYCMD and CMDSCRIPT are now run directly as a single program path, not through a shell; arguments or shell syntax in those settings no longer work
 - note: the netxml-ups, nut-ipmipsu and powerman-pdu drivers are not included in that build because Unraid lacks their libraries
