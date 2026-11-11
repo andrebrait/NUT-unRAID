@@ -15,7 +15,7 @@ import re
 import sys
 
 REPO = Path(__file__).resolve().parent.parent
-PLG = REPO / "plugin/nut-dw.plg"
+PLG = REPO / "plugin/nut3.plg"
 # Not under build/: native-nut.yml rebuilds on pushes to build/**.
 TESTED = REPO / ".github/tested-unraid.json"
 

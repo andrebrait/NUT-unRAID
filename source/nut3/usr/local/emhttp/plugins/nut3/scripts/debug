@@ -1,0 +1,185 @@
+#!/bin/bash
+# shellcheck disable=SC2129
+#
+# Copyright Derek Macias (parts of code from NUT package)
+# Copyright macester (parts of code from NUT package)
+# Copyright gfjardim (parts of code from NUT package)
+# Copyright SimonF (parts of code from NUT package)
+# Copyright Lime Technology (any and all other parts of Unraid)
+#
+# Copyright desertwitch (as author and maintainer of this file)
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License 2
+# as published by the Free Software Foundation.
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+
+DEBUGROOT="/tmp/nut-debug"
+PKGROOT="/usr/local/emhttp/plugins/nut3/debug"
+CONFIG="/boot/config/plugins/nut3/nut3.cfg"
+DEBUGTIME="$(date '+%Y%m%d%H%M%S' 2>/dev/null)"
+DEBUGNAME="nut-debug-${DEBUGTIME}.zip"
+
+# prepare download location
+rm -rf $PKGROOT 2>&1
+mkdir -p $PKGROOT 2>&1
+
+# prepare packaging location
+rm -rf $DEBUGROOT 2>&1
+
+mkdir -p $DEBUGROOT 2>&1
+mkdir -p $DEBUGROOT/RAM 2>&1
+mkdir -p $DEBUGROOT/USB 2>&1
+mkdir -p $DEBUGROOT/PLUGIN 2>&1
+
+# read and prepare configuration file
+[ -e "$CONFIG" ] && source $CONFIG 2>&1
+
+MONPASSDEC="$(echo "$MONPASS" | base64 --decode)"
+SLAVEPASSDEC="$(echo "$SLAVEPASS" | base64 --decode)"
+
+# copy relevant files to packaging location
+[ -f $CONFIG ] && cp -f $CONFIG $DEBUGROOT/PLUGIN/nut3.cfg.txt 2>&1
+
+[ -f /etc/nut/nut.conf ] && cp -f /etc/nut/nut.conf $DEBUGROOT/RAM/nut.conf.txt 2>&1
+[ -f /etc/nut/ups.conf ] && cp -f /etc/nut/ups.conf $DEBUGROOT/RAM/ups.conf.txt 2>&1
+[ -f /etc/nut/upsd.conf ] && cp -f /etc/nut/upsd.conf $DEBUGROOT/RAM/upsd.conf.txt 2>&1
+[ -f /etc/nut/upsd.users ] && cp -f /etc/nut/upsd.users $DEBUGROOT/RAM/upsd.users.txt 2>&1
+[ -f /etc/nut/upsmon.conf ] && cp -f /etc/nut/upsmon.conf $DEBUGROOT/RAM/upsmon.conf.txt 2>&1
+[ -f /etc/nut/upssched.conf ] && cp -f /etc/nut/upssched.conf $DEBUGROOT/RAM/upssched.conf.txt 2>&1
+[ -f /etc/nut/xnut-nospam.conf ] && cp -f /etc/nut/xnut-nospam.conf $DEBUGROOT/RAM/xnut-nospam.conf.txt 2>&1
+
+[ -f /boot/config/plugins/nut3/ups/nut.conf ] && cp -f /boot/config/plugins/nut3/ups/nut.conf $DEBUGROOT/USB/nut.conf.txt 2>&1
+[ -f /boot/config/plugins/nut3/ups/ups.conf ] && cp -f /boot/config/plugins/nut3/ups/ups.conf $DEBUGROOT/USB/ups.conf.txt 2>&1
+[ -f /boot/config/plugins/nut3/ups/upsd.conf ] && cp -f /boot/config/plugins/nut3/ups/upsd.conf $DEBUGROOT/USB/upsd.conf.txt 2>&1
+[ -f /boot/config/plugins/nut3/ups/upsd.users ] && cp -f /boot/config/plugins/nut3/ups/upsd.users $DEBUGROOT/USB/upsd.users.txt 2>&1
+[ -f /boot/config/plugins/nut3/ups/upsmon.conf ] && cp -f /boot/config/plugins/nut3/ups/upsmon.conf $DEBUGROOT/USB/upsmon.conf.txt 2>&1
+[ -f /boot/config/plugins/nut3/ups/upssched.conf ] && cp -f /boot/config/plugins/nut3/ups/upssched.conf $DEBUGROOT/USB/upssched.conf.txt 2>&1
+[ -f /boot/config/plugins/nut3/ups/xnut-nospam.conf ] && cp -f /boot/config/plugins/nut3/ups/xnut-nospam.conf $DEBUGROOT/USB/xnut-nospam.conf.txt 2>&1
+
+# anonymize files to be packaged as much as possible
+[ -f $DEBUGROOT/PLUGIN/nut3.cfg.txt ] && sed -i '/MONUSER=/c\MONUSER="USER-REMOVED"' $DEBUGROOT/PLUGIN/nut3.cfg.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut3.cfg.txt ] && sed -i '/SLAVEUSER=/c\SLAVEUSER="USER-REMOVED"' $DEBUGROOT/PLUGIN/nut3.cfg.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut3.cfg.txt ] && sed -i '/MONPASS=/c\MONPASS="PASS-REMOVED"' $DEBUGROOT/PLUGIN/nut3.cfg.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut3.cfg.txt ] && sed -i '/SLAVEPASS=/c\SLAVEPASS="PASS-REMOVED"' $DEBUGROOT/PLUGIN/nut3.cfg.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut3.cfg.txt ] && sed -i '/COMMUNITY=/c\COMMUNITY="COMMUNITY-REMOVED"' $DEBUGROOT/PLUGIN/nut3.cfg.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut3.cfg.txt ] && sed -i -e '/^ADMINUSER=/c\ADMINUSER="USER-REMOVED"' -e '/^ADMINPASS=/c\ADMINPASS="PASS-REMOVED"' -e 's/^\(CUSTOM_[A-Z]*\)=.*/\1="REMOVED (see the configuration files)"/' $DEBUGROOT/PLUGIN/nut3.cfg.txt 2>&1
+[ -n "$ADMINUSER" ] && sed -i "s/${ADMINUSER}/USER-REMOVED/g" $DEBUGROOT/RAM/upsd.users.txt $DEBUGROOT/USB/upsd.users.txt 2>&1
+
+[ -f $DEBUGROOT/RAM/ups.conf.txt ] && sed -i '/community/c\community = COMMUNITY-REMOVED' $DEBUGROOT/RAM/ups.conf.txt 2>&1
+[ -f $DEBUGROOT/USB/ups.conf.txt ] && sed -i '/community/c\community = COMMUNITY-REMOVED' $DEBUGROOT/USB/ups.conf.txt 2>&1
+[ -f $DEBUGROOT/RAM/ups.conf.txt ] && sed -i '/serial/c\serial = "REMOVED"' $DEBUGROOT/RAM/ups.conf.txt 2>&1
+[ -f $DEBUGROOT/USB/ups.conf.txt ] && sed -i '/serial/c\serial = "REMOVED"' $DEBUGROOT/USB/ups.conf.txt 2>&1
+
+[ -f $DEBUGROOT/RAM/upsd.users.txt ] && sed -i '/password/c\password=PASS-REMOVED' $DEBUGROOT/RAM/upsd.users.txt 2>&1
+[ -f $DEBUGROOT/USB/upsd.users.txt ] && sed -i '/password/c\password=PASS-REMOVED' $DEBUGROOT/USB/upsd.users.txt 2>&1
+
+[ -f $DEBUGROOT/RAM/upsd.users.txt ] && sed -i "s/${MONUSER}/USER-REMOVED/g" $DEBUGROOT/RAM/upsd.users.txt 2>&1
+[ -f $DEBUGROOT/RAM/upsd.users.txt ] && sed -i "s/${SLAVEUSER}/USER-REMOVED/g" $DEBUGROOT/RAM/upsd.users.txt 2>&1
+[ -f $DEBUGROOT/USB/upsd.users.txt ] && sed -i "s/${MONUSER}/USER-REMOVED/g" $DEBUGROOT/USB/upsd.users.txt 2>&1
+[ -f $DEBUGROOT/USB/upsd.users.txt ] && sed -i "s/${SLAVEUSER}/USER-REMOVED/g" $DEBUGROOT/USB/upsd.users.txt 2>&1
+
+[ -f $DEBUGROOT/RAM/upsmon.conf.txt ] && sed -i "s/${MONUSER}/USER-REMOVED/g" $DEBUGROOT/RAM/upsmon.conf.txt 2>&1
+[ -f $DEBUGROOT/RAM/upsmon.conf.txt ] && sed -i "s/${SLAVEUSER}/USER-REMOVED/g" $DEBUGROOT/RAM/upsmon.conf.txt 2>&1
+[ -f $DEBUGROOT/USB/upsmon.conf.txt ] && sed -i "s/${MONUSER}/USER-REMOVED/g" $DEBUGROOT/USB/upsmon.conf.txt 2>&1
+[ -f $DEBUGROOT/USB/upsmon.conf.txt ] && sed -i "s/${SLAVEUSER}/USER-REMOVED/g" $DEBUGROOT/USB/upsmon.conf.txt 2>&1
+
+[ -f $DEBUGROOT/RAM/upsmon.conf.txt ] && sed -i "s/${MONPASSDEC}/PASS-REMOVED/g" $DEBUGROOT/RAM/upsmon.conf.txt 2>&1
+[ -f $DEBUGROOT/RAM/upsmon.conf.txt ] && sed -i "s/${SLAVEPASSDEC}/PASS-REMOVED/g" $DEBUGROOT/RAM/upsmon.conf.txt 2>&1
+[ -f $DEBUGROOT/USB/upsmon.conf.txt ] && sed -i "s/${MONPASSDEC}/PASS-REMOVED/g" $DEBUGROOT/USB/upsmon.conf.txt 2>&1
+[ -f $DEBUGROOT/USB/upsmon.conf.txt ] && sed -i "s/${SLAVEPASSDEC}/PASS-REMOVED/g" $DEBUGROOT/USB/upsmon.conf.txt 2>&1
+
+# include UPS information in package, if NUT services are running
+if pgrep -x upsmon >/dev/null 2>&1; then
+    [ -x /usr/bin/upsc ] && /usr/bin/upsc "$NAME"@"$IPADDR" > $DEBUGROOT/PLUGIN/"$NAME".dev.txt 2>&1
+    [ -x /usr/bin/upscmd ] && /usr/bin/upscmd -l "$NAME"@"$IPADDR" > $DEBUGROOT/PLUGIN/"$NAME".cmd.txt 2>&1
+    [ -f $DEBUGROOT/PLUGIN/"$NAME".dev.txt ] && sed -i '/device.serial/c\device.serial: REMOVED' $DEBUGROOT/PLUGIN/"$NAME".dev.txt 2>&1
+    [ -f $DEBUGROOT/PLUGIN/"$NAME".dev.txt ] && sed -i '/device.macaddr/c\device.macaddr: REMOVED' $DEBUGROOT/PLUGIN/"$NAME".dev.txt 2>&1
+    [ -f $DEBUGROOT/PLUGIN/"$NAME".dev.txt ] && sed -i '/ups.serial/c\ups.serial: REMOVED' $DEBUGROOT/PLUGIN/"$NAME".dev.txt 2>&1
+    [ -f $DEBUGROOT/PLUGIN/"$NAME".dev.txt ] && sed -i '/ups.macaddr/c\ups.macaddr: REMOVED' $DEBUGROOT/PLUGIN/"$NAME".dev.txt 2>&1
+else
+    touch $DEBUGROOT/PLUGIN/upsmon-not-running 2>&1
+fi
+
+# include NUT syslog filters, syslog and spam log in package
+[ -f /etc/logrotate.d/nut ] && cp -f /etc/logrotate.d/nut $DEBUGROOT/PLUGIN/nut-logrotate.txt 2>&1
+[ -f /etc/logrotate.d/nut-spam ] && cp -f /etc/logrotate.d/nut-spam $DEBUGROOT/PLUGIN/nut-logrotate-spam.txt 2>&1
+
+[ -f /etc/rsyslog.d/xnut-nospam.conf ] && cp -f /etc/rsyslog.d/xnut-nospam.conf $DEBUGROOT/PLUGIN/xnut-nospam.conf.txt 2>&1
+[ -f /etc/rsyslog.d/98-nut-nospam.conf ] && cp -f /etc/rsyslog.d/98-nut-nospam.conf $DEBUGROOT/PLUGIN/98-nut-nospam.conf.txt 2>&1
+[ -f /etc/rsyslog.d/99-nut-to-both.conf ] && cp -f /etc/rsyslog.d/99-nut-to-both.conf $DEBUGROOT/PLUGIN/99-nut-to-both.conf.txt 2>&1
+[ -f /etc/rsyslog.d/99-nut-to-file.conf ] && cp -f /etc/rsyslog.d/99-nut-to-file.conf $DEBUGROOT/PLUGIN/99-nut-to-file.conf.txt 2>&1
+
+[ -f /var/log/nut.log ] && cp -f /var/log/nut.log $DEBUGROOT/PLUGIN/nut-syslog-file.txt 2>&1
+[ -f /var/log/nut-spam ] && cp -f /var/log/nut-spam $DEBUGROOT/PLUGIN/nut-syslog-spam.txt 2>&1
+
+[ -f $DEBUGROOT/PLUGIN/nut-syslog-file.txt ] && sed -i "s/${MONUSER}/USER-REMOVED/g" $DEBUGROOT/PLUGIN/nut-syslog-file.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut-syslog-file.txt ] && sed -i "s/${SLAVEUSER}/USER-REMOVED/g" $DEBUGROOT/PLUGIN/nut-syslog-file.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut-syslog-file.txt ] && sed -i "s/${MONPASSDEC}/PASS-REMOVED/g" $DEBUGROOT/PLUGIN/nut-syslog-file.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut-syslog-file.txt ] && sed -i "s/${SLAVEPASSDEC}/PASS-REMOVED/g" $DEBUGROOT/PLUGIN/nut-syslog-file.txt 2>&1
+
+[ -f $DEBUGROOT/PLUGIN/nut-syslog-spam.txt ] && sed -i "s/${MONUSER}/USER-REMOVED/g" $DEBUGROOT/PLUGIN/nut-syslog-spam.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut-syslog-spam.txt ] && sed -i "s/${SLAVEUSER}/USER-REMOVED/g" $DEBUGROOT/PLUGIN/nut-syslog-spam.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut-syslog-spam.txt ] && sed -i "s/${MONPASSDEC}/PASS-REMOVED/g" $DEBUGROOT/PLUGIN/nut-syslog-spam.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut-syslog-spam.txt ] && sed -i "s/${SLAVEPASSDEC}/PASS-REMOVED/g" $DEBUGROOT/PLUGIN/nut-syslog-spam.txt 2>&1
+
+# check if APC daemon is also running which could cause problems with NUT
+if pgrep -x apcupsd >/dev/null 2>&1; then
+    touch $DEBUGROOT/PLUGIN/apcupsd-also-running 2>&1
+fi
+
+# scan for UPS devices and include the results in the package
+[ -x /usr/bin/nut-scanner ] && /usr/bin/nut-scanner -N > $DEBUGROOT/PLUGIN/nut-scanner.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut-scanner.txt ] && sed -i '/serial/c\serial = "REMOVED"' $DEBUGROOT/PLUGIN/nut-scanner.txt 2>&1
+
+# check for username misconfiguration without including them in package
+if [ "$MONUSER" == "$SLAVEUSER" ]; then
+    touch $DEBUGROOT/PLUGIN/same-usernames-detected 2>&1
+fi
+
+# check for powertop package which is known to cause problems with NUT
+[ -n "$(find /var/log/packages/ -type f -iname 'powertop*' -printf '%f\n' 2> /dev/null)" ] && touch $DEBUGROOT/PLUGIN/powertop-is-installed 2>&1
+
+# check for common powertop and usb power management related modifications in go file
+[ ! "$( grep -ic "powertop" /boot/config/go )" -eq 0 ] && touch $DEBUGROOT/PLUGIN/go-powertop-detected 2>&1
+[ ! "$( grep -ic -- "--auto-tune" /boot/config/go )" -eq 0 ] && touch $DEBUGROOT/PLUGIN/go-auto-tune-detected 2>&1
+[ ! "$( grep -ic "/power/control" /boot/config/go )" -eq 0 ] && touch $DEBUGROOT/PLUGIN/go-power-control-mod-detected 2>&1
+
+# include names and versions of installed nut-related packages in package
+find /var/log/packages/ -type f -iname 'nut*' -printf '%f\n' >> $DEBUGROOT/unraid-packages.txt 2>&1
+find /var/log/packages/ -type f -iname 'net-snmp*' -printf '%f\n' >> $DEBUGROOT/unraid-packages.txt 2>&1
+find /var/log/packages/ -type f -iname 'libmodbus*' -printf '%f\n' >> $DEBUGROOT/unraid-packages.txt 2>&1
+find /var/log/packages/ -type f -iname 'powertop*' -printf '%f\n' >> $DEBUGROOT/unraid-packages.txt 2>&1
+
+# include system detected USB devices in package
+lsusb >> $DEBUGROOT/unraid-lsusb.txt 2>&1
+echo "" >> $DEBUGROOT/unraid-lsusb.txt 2>&1
+lsusb -tv >> $DEBUGROOT/unraid-lsusb.txt 2>&1
+echo "" >> $DEBUGROOT/unraid-lsusb.txt 2>&1
+tail -v /sys/bus/usb/devices/*/power/control >> $DEBUGROOT/unraid-lsusb.txt 2>&1
+
+# include configuration migration status in package
+[ -f /boot/config/plugins/nut3/migration-complete ] && cp -f /boot/config/plugins/nut3/migration-complete $DEBUGROOT/PLUGIN/migration-complete 2>&1
+[ -f /boot/config/plugins/nut3/migration-failed ] && cp -f /boot/config/plugins/nut3/migration-failed $DEBUGROOT/PLUGIN/migration-failed 2>&1
+
+# include unraid version in package
+[ -f /etc/unraid-version ] && cp -f /etc/unraid-version $DEBUGROOT/unraid-version.txt 2>&1
+
+# include plugin definition files in package
+cp -f /boot/config/plugins/nut3.plg $DEBUGROOT/PLUGIN/nut3.plg.txt 2>&1
+
+# generate and include diagnostics package
+DIAGFILE="$(timeout -s9 90 /usr/local/sbin/diagnostics 2>/dev/null | grep -o "/boot/logs/.*\.zip")"
+[ -f "$DIAGFILE" ] && mv -f "$DIAGFILE" $DEBUGROOT/ 2>&1
+
+# package up the prepared files in our packaging location
+(cd $DEBUGROOT && zip -r "${PKGROOT}/${DEBUGNAME}" . 2>&1)
+
+# clean up packaging location
+rm -rf $DEBUGROOT 2>&1
+
+# return with the name of the debug package
+[ -f "${PKGROOT}/${DEBUGNAME}" ] && echo "DONE:${PKGROOT}/${DEBUGNAME}" 2>&1

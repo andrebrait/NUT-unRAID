@@ -1,16 +1,16 @@
 ## Fork notice
 
-This is a maintained fork of [desertwitch/NUT-unRAID](https://github.com/desertwitch/NUT-unRAID) by desertwitch. Upstream has announced its end of support, so this fork carries on maintaining the plugin and publishes its own releases.
+This is a maintained fork of [desertwitch/NUT-unRAID](https://github.com/desertwitch/NUT-unRAID) by desertwitch. Upstream has announced its end of support, so this fork carries on maintaining the plugin and publishes its own releases as **NUT v3 (Network UPS Tools)**, plugin `nut3`.
 
 ### Installation
 
 In the Unraid web UI, go to **Plugins → Install Plugin** and enter:
 
 ```
-https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master/plugin/nut-dw.plg
+https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master/plugin/nut3.plg
 ```
 
-Installing over the original NUT plugin keeps your settings.
+Installing it replaces the earlier `nut-dw` plugin (NUT v2, the original or an earlier release of this fork) and keeps your settings: they move from `/boot/config/plugins/nut-dw` to `/boot/config/plugins/nut3`.
 
 ### Requirements
 
@@ -21,7 +21,7 @@ Installing over the original NUT plugin keeps your settings.
 Report bugs and feature requests in the [issue tracker of this fork](https://github.com/andrebrait/NUT-unRAID/issues).
 
 
-Network UPS Tools (NUT) for UNRAID
+NUT v3 (Network UPS Tools) for UNRAID
 ================
 _A refactored, modernized version of the original NUT plugin with a focus on frequent updates._
 

@@ -1,6 +1,6 @@
 name: Verify NUT on Unraid
 
-# Installs the NUT package (by default the one nut-dw.plg ships as nutNAME) plus net-snmp/libmodbus into
+# Installs the NUT package (by default the one nut3.plg ships as nutNAME) plus net-snmp/libmodbus into
 # the exact Unraid root, resolves every ELF dependency with that root's loader, and runs the -V and SSL smokes.
 on:
   workflow_call:

@@ -1,6 +1,6 @@
 <?php
 
-require_once __DIR__ . '/../source/nut-dw/usr/local/emhttp/plugins/nut-dw/include/nut_helpers.php';
+require_once __DIR__ . '/../source/nut3/usr/local/emhttp/plugins/nut3/include/nut_helpers.php';
 
 $input = 'Update <em>available</em><script>alert(1)</script> &amp; ready.';
 $expected = 'Update availablealert(1) & ready.';

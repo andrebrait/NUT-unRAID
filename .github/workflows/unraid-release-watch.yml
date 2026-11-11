@@ -54,7 +54,7 @@ jobs:
         run: NERDTOOLS="$PWD/.nerdtools" python3 -m unittest discover -s build -p 'test_release_watch.py' -v
       - name: Discover official releases with authoritative ZIP SHA256s
         run: |
-          minimum=$(grep -oP '&nutNAME;\.txz" Min="\K[^"]+' plugin/nut-dw.plg)
+          minimum=$(grep -oP '&nutNAME;\.txz" Min="\K[^"]+' plugin/nut3.plg)
           python3 .nerdtools/scripts/check-unraid-releases.py --baseline "$minimum" --output unraid-releases.json
       - name: Select releases still to verify
         id: select
@@ -112,7 +112,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          package=$(grep -oP '<!ENTITY nutNAME\s+"\K[^"]+' plugin/nut-dw.plg)
+          package=$(grep -oP '<!ENTITY nutNAME\s+"\K[^"]+' plugin/nut3.plg)
           jq -c '.[] | select(.ok | not)' results.json | while read -r failed; do
             version=$(jq -r .version <<<"$failed")
             title="Unraid $version: NUT package verification failed"

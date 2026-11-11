@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Serve the NUT plugin's WebGUI pages from an exact Unraid root, for the browser tests in this directory.
 
-up     Extracts the pinned Unraid image (build/nut.json targets) into WORK/root with NerdTools' bootstrap,
-       links /etc/rc.d as rc.S does at boot, installs the NUT backend named by the .plg and a plugin package
-       built from source/nut-dw (the same tar as package.yml) with the root's own upgradepkg, so doinst.sh
-       runs. It then replaces the NUT daemons and clients with fixture-driven stubs (stubs/), writes the state
-       files emhttpd would write, and starts the root's own rsyslogd, php-fpm (its own php.ini, so the real
-       CSRF prepend) and nginx, chrooted, on 127.0.0.1:PORT. nginx gets Unraid's routing (rc.nginx locations)
-       without login.
+up     Extracts the pinned Unraid image (build/nut.json targets) into WORK/root with NerdTools' bootstrap and
+       links /etc/rc.d as rc.S does at boot. It first checks the upgrade from the last nut-dw release (the
+       .plg's migration block, then the new package) and removes it again. It then installs the NUT backend
+       named by the .plg and a plugin package built from source/nut3 (the same tar as package.yml) with the
+       root's own upgradepkg, so doinst.sh runs. It then replaces the NUT daemons and clients with
+       fixture-driven stubs (stubs/), writes the state files emhttpd would write, and starts the root's own
+       rsyslogd, php-fpm (its own php.ini, so the real CSRF prepend) and nginx, chrooted, on 127.0.0.1:PORT.
+       nginx gets Unraid's routing (rc.nginx locations) without login.
 reset  Restores the plugin's flash directory and the stub fixtures to their state right after installation.
 down   Stops every process running in the root, unmounts it and copies the server logs to --logs.
 
@@ -26,13 +27,15 @@ import subprocess
 import sys
 import time
 import urllib.request
+import xml.etree.ElementTree as ET
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-FLASH = "boot/config/plugins/nut-dw"
+FLASH = "boot/config/plugins/nut3"
 FIXTURES = "var/tmp/nut-e2e"            # stub inputs and outputs, see stubs/
 PRISTINE = "var/tmp/nut-e2e-pristine"   # flash directory and fixtures right after installation
 STUBS = {"upsc": "usr/bin", "upscmd": "usr/bin", "upsmon": "usr/sbin", "upsd": "usr/sbin", "upsdrvctl": "usr/sbin"}
+RELEASED = "nut-plugin-2026.11.14-x86_64-1.txz"  # the last release under the old plugin name nut-dw
 
 
 def run(args, **kwargs):
@@ -45,7 +48,7 @@ def chroot(root, *args, **kwargs):
 
 
 def entity(name):
-    plg = (REPO / "plugin/nut-dw.plg").read_text()
+    plg = (REPO / "plugin/nut3.plg").read_text()
     return re.search(rf'<!ENTITY {name}\s+"([^"]+)">', plg).group(1)
 
 
@@ -57,15 +60,64 @@ def fixtures(root):
         shutil.copy(source, target / source.name)
 
 
+def package(target):
+    # the same tar invocation as .github/workflows/package.yml (members named like makepkg's, so installpkg runs doinst.sh)
+    run(["tar", "-C", REPO / "source/nut3", "--owner=0", "--group=0", "--sort=name", r"--transform=s,^\./\(.\),\1,",
+         "-cJf", target, "."])
+
+
+def upgrade(root):
+    """Install the last nut-dw release with changed settings, then upgrade as the .plg does and check the result."""
+    old, new = root / "boot/config/plugins/nut-dw", root / FLASH
+    packages = root / "tmp/nut-e2e-upgrade"
+    packages.mkdir(parents=True)
+    shutil.copy(REPO / "archive" / RELEASED, packages / RELEASED)
+    plugin = f"nut-plugin-{entity('version')}-x86_64-1.txz"
+    package(packages / plugin)
+
+    old.mkdir(parents=True)
+    defaults = (REPO / "source/nut3/usr/local/emhttp/plugins/nut3/default.cfg").read_text()
+    (old / "nut-dw.cfg").write_text(defaults.replace('NAME="ups"', 'NAME="upgradeups"').replace('POLL="15"', 'POLL="7"'))
+    chroot(root, "/sbin/upgradepkg", "--install-new", f"/tmp/nut-e2e-upgrade/{RELEASED}")
+    (old / RELEASED).write_bytes(b"")  # a package the old .plg cached
+    (root / "var/log/plugins").mkdir(parents=True, exist_ok=True)
+    for plg in (root / "boot/config/plugins/nut-dw.plg", root / "var/log/plugins/nut-dw.plg"):
+        plg.write_text("<PLUGIN/>\n")
+    cfg = (old / "nut-dw.cfg").read_text()
+    ups = {p.name: p.read_text() for p in (old / "ups").iterdir()}
+    assert 'NAME="upgradeups"' in cfg and "[upgradeups]" in ups["ups.conf"], "the old release did not take the settings"
+
+    snippet = next(i.text for i in ET.parse(REPO / "plugin/nut3.plg").iter("INLINE")
+                   if i.text.lstrip().startswith("# Migrate from nut-dw"))
+    chroot(root, "/bin/bash", "-c", snippet)
+    assert (new / "nut3.cfg").read_text() == cfg, "settings not moved to nut3.cfg"
+    assert {p.name: p.read_text() for p in (new / "ups").iterdir()} == ups, "ups/ files not moved"
+    assert not (new / RELEASED).exists() and not (new / "nut-dw.cfg").exists(), "cached package or nut-dw.cfg copied"
+    for gone in (old, root / "boot/config/plugins/nut-dw.plg", root / "var/log/plugins/nut-dw.plg",
+                 root / "usr/local/emhttp/plugins/nut-dw"):
+        assert not gone.exists() and not gone.is_symlink(), f"{gone} remains"
+
+    chroot(root, "/sbin/upgradepkg", "--install-new", f"/tmp/nut-e2e-upgrade/{plugin}")
+    assert (new / "nut3.cfg").read_text() == cfg, "the new package changed the settings"
+    assert not (new / "import-report.json").exists(), "files generated by nut-dw were imported as hand-edited ones"
+    for name, text in ups.items():
+        assert (new / "ups" / name).read_text() == text.replace("(nut-dw) ", "", 1), f"ups/{name} changed beyond its header"
+    assert not (root / "usr/local/emhttp/plugins/nut-dw").exists(), "/usr/local/emhttp/plugins/nut-dw remains"
+    print("Upgrade from nut-dw: settings and ups/ files carried over", flush=True)
+
+    # the page tests start from a fresh installation
+    chroot(root, "/sbin/removepkg", "nut-plugin")
+    shutil.rmtree(new)
+    shutil.rmtree(packages)
+
+
 def install(root, work):
     packages = root / "tmp/nut-e2e-packages"
     packages.mkdir(parents=True)
     backend = f"{entity('nutNAME')}.txz"
     shutil.copy(REPO / "packages" / backend, packages / backend)
     plugin = f"nut-plugin-{entity('version')}-x86_64-1.txz"
-    # the same tar invocation as .github/workflows/package.yml (members named like makepkg's, so installpkg runs doinst.sh)
-    run(["tar", "-C", REPO / "source/nut-dw", "--owner=0", "--group=0", "--sort=name", r"--transform=s,^\./\(.\),\1,",
-         "-cJf", packages / plugin, "."])
+    package(packages / plugin)
     (root / FLASH).mkdir(parents=True)  # the .plg creates it before installing the package
     # backend first, plugin last, as the .plg does on 7.3.4+; the log is checked by nut.spec.js
     log = chroot(root, "/sbin/upgradepkg", "--install-new", f"/tmp/nut-e2e-packages/{backend}",
@@ -183,6 +235,7 @@ def up(args):
     # as rc.S does at boot: /etc/rc.d becomes the /usr layer's rc.d (rc.6, rc.nginx, ...)
     shutil.rmtree(root / "etc/rc.d")
     (root / "etc/rc.d").symlink_to("/usr/local/etc/rc.d")
+    upgrade(root)
     install(root, work)
     state(root)
     snapshot(root)
@@ -195,7 +248,7 @@ def reset(args):
     for name, target in (("flash", FLASH), ("fixtures", FIXTURES)):
         shutil.rmtree(root / target, ignore_errors=True)
         shutil.copytree(root / PRISTINE / name, root / target, symlinks=True)
-    (root / "usr/local/emhttp/plugins/nut-dw/misc/start-failed").unlink(missing_ok=True)
+    (root / "usr/local/emhttp/plugins/nut3/misc/start-failed").unlink(missing_ok=True)
 
 
 def down(args):

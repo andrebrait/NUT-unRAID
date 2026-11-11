@@ -122,9 +122,9 @@ test.describe('Import of a previous configuration', () => {
   function stageLegacy(name) {
     const dir = path.join(REPO, 'tests/fixtures', name);
     for (const file of fs.readdirSync(dir)) {
-      root.write(file === 'nut-dw.cfg' ? `${FLASH}/nut-dw.cfg` : `${FLASH}/ups/${file}`, fs.readFileSync(path.join(dir, file), 'utf8'));
+      root.write(file === 'nut3.cfg' ? `${FLASH}/nut3.cfg` : `${FLASH}/ups/${file}`, fs.readFileSync(path.join(dir, file), 'utf8'));
     }
-    root.sh('/usr/bin/php /usr/local/emhttp/plugins/nut-dw/scripts/managed_config write');
+    root.sh('/usr/bin/php /usr/local/emhttp/plugins/nut3/scripts/managed_config write');
     expect(root.exists(`${FLASH}/import-report.json`)).toBe(true);
   }
   const banner = (page) => page.locator('div.red-text', { hasText: 'Your previous NUT configuration was imported' });

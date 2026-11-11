@@ -1,5 +1,5 @@
 {
-  "name": "nut-dw-page-tests",
+  "name": "nut3-page-tests",
   "private": true,
   "description": "Browser tests of the NUT plugin pages, served from an exact Unraid root by harness.py",
   "scripts": {

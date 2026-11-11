@@ -17,12 +17,12 @@ jobs:
       - name: Syntax checks
         run: |
           php --version
-          plugin=source/nut-dw/usr/local/emhttp/plugins/nut-dw
+          plugin=source/nut3/usr/local/emhttp/plugins/nut3
           # Unraid enables short open tags; .page files are PHP after their header
           for f in $(find source tests -name '*.php' -o -name '*.page') "$plugin/scripts/managed_config"; do
             php -d short_open_tag=1 -l "$f" >/dev/null
           done
-          for f in source/nut-dw/etc/rc.d/* source/nut-dw/install/doinst.sh source/nut-dw/usr/sbin/* "$plugin"/scripts/*; do
+          for f in source/nut3/etc/rc.d/* source/nut3/install/doinst.sh source/nut3/usr/sbin/* "$plugin"/scripts/*; do
             if head -n1 "$f" | grep -q bash; then bash -n "$f"; fi
           done
 

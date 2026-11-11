@@ -121,10 +121,10 @@ def check(root, command):
 
 
 def shipped_package():
-    """The package the plugin ships on Unraid 7.3.4+: packages/<nutNAME>.txz from plugin/nut-dw.plg."""
+    """The package the plugin ships on Unraid 7.3.4+: packages/<nutNAME>.txz from plugin/nut3.plg."""
     path = REPO / "packages" / f"{plg_entity('nutNAME')}.txz"
     if hashlib.md5(path.read_bytes()).hexdigest() != plg_entity("nutMD5"):
-        raise ValueError(f"{path.name} does not match the nutMD5 in nut-dw.plg")
+        raise ValueError(f"{path.name} does not match the nutMD5 in nut3.plg")
     return path
 
 
@@ -202,7 +202,7 @@ def main():
     b.add_argument("--work", default="/tmp")
     v = sub.add_parser("verify")
     v.add_argument("--target", required=True, help="Unraid version; a pinned one in nut.json, else give --url/--sha256")
-    v.add_argument("--package", help="package to verify (default: the one nut-dw.plg ships as nutNAME)")
+    v.add_argument("--package", help="package to verify (default: the one nut3.plg ships as nutNAME)")
     v.add_argument("--url", help="Unraid ZIP URL (overrides the nut.json pin)")
     v.add_argument("--sha256", help="SHA256 of the Unraid ZIP")
     v.add_argument("--bzroot-sha256", help="optional SHA256 of the ZIP's bzroot member")

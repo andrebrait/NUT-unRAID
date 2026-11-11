@@ -1,6 +1,6 @@
 <?php
 
-require_once __DIR__ . '/../source/nut-dw/usr/local/emhttp/plugins/nut-dw/include/nut_helpers.php';
+require_once __DIR__ . '/../source/nut3/usr/local/emhttp/plugins/nut3/include/nut_helpers.php';
 
 $input = '"><img src=x onerror=alert(1)>&';
 $expected = '&quot;&gt;&lt;img src=x onerror=alert(1)&gt;&amp;';

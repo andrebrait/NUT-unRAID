@@ -1,0 +1,874 @@
+<?xml version='1.0' standalone='yes'?>
+
+<!DOCTYPE PLUGIN [
+<!ENTITY name      "nut3">
+<!ENTITY author    "desertwitch">
+<!ENTITY version   "2026.11.15">
+<!ENTITY launch    "Settings/NUTsettings">
+<!ENTITY gitURL    "https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master">
+<!ENTITY pluginURL "&gitURL;/plugin/&name;.plg">
+<!ENTITY pkgURL    "&gitURL;/packages">
+<!ENTITY plgPATH   "/boot/config/plugins/&name;">
+<!ENTITY plgNAME   "nut-plugin-2026.11.14-x86_64-1">
+<!ENTITY plgMD5    "73f45162dab54596c9389acf9eec7a0e">
+<!ENTITY nutNAME   "nut-2.8.5.1711_g1c4ab78c6-x86_64-2_andrebrait">
+<!ENTITY nutMD5    "c9109f45b7240ed720aa22143cd1e3f9">
+<!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
+]>
+
+<PLUGIN name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" support="https://github.com/andrebrait/NUT-unRAID/issues" min="7.3.4">
+
+<CHANGES>
+## NUT v3 (Network UPS Tools) for UNRAID
+###2026.11.15
+- important: the plugin is renamed from nut-dw to nut3 and is now listed as NUT v3 (Network UPS Tools), so it can be told apart from the original NUT v2 plugin by desertwitch. Installing it replaces the nut-dw plugin (the original or an earlier release of this fork) and keeps your settings: they move from /boot/config/plugins/nut-dw to /boot/config/plugins/nut3 and nut-dw.cfg becomes nut3.cfg.
+- note: support now happens in the GitHub issue tracker at https://github.com/andrebrait/NUT-unRAID/issues
+###2026.11.14
+- important: the plugin now requires Unraid 7.3.4 or newer; older Unraid releases only had NUT builds affected by CVE-2026-54161
+- fix: Apply can now be clicked right away to accept an imported configuration
+- fix: the plugin package's install script now runs again (since 2026.11.11 it was skipped, so fresh installs lacked the nut group and default settings)
+###2026.11.13
+- security: on Unraid 7.3.4 and newer, the default and preview backends are now NUT built in GitHub Actions from upstream master commit 1c4ab78c6, which includes the fixes for CVE-2026-54161 (upsmon NOTIFYCMD command injection) and CVE-2026-85068 (blazer_usb) and the libusb reconnect hang fix (networkupstools/nut#3448)
+- note: NOTIFYCMD and CMDSCRIPT are now run directly as a single program path, not through a shell; arguments or shell syntax in those settings no longer work
+- note: the netxml-ups, nut-ipmipsu and powerman-pdu drivers are not included in that build because Unraid lacks their libraries
+- important: the plugin now generates the complete NUT configuration from its settings; the manual configuration modes and the configuration editor are gone
+- important: on upgrade your previous configuration files are imported into the settings and custom directive fields; NUT keeps using the previous files until you review the NUT Settings and click Apply, and conflicting directives must be resolved first
+- important: the default upsd admin user (admin/adminpass) is no longer created; set a NUT Admin Username and Password in the NUT Settings to use NUT Commands
+- important: in standalone mode upsd now only listens on 127.0.0.1; netserver mode listens on the configurable NUT Listen Addresses (default 0.0.0.0)
+- new: custom directive fields for nut.conf, ups.conf, upsd.conf, upsd.users, upsmon.conf and upssched.conf
+- new: Auto Config writes the detected UPS into the settings
+- fix: values are quoted and escaped for NUT, invalid settings are rejected when saving and NUT does not start with them
+- fix: UPS names may contain underscores and dots (e.g. ippon_ups)
+- fix: report loudly when the UPS power-off hook cannot be added to rc.6
+- fix: escape UPS data in the WebGUI and show the developer message as plain text
+###2026.11.11
+- fork: plugin, packages and updates now come from https://github.com/andrebrait/NUT-unRAID
+- fix: restore generated upsmon roles in upsd.users
+###2026.10.16
+#### Plugin Advisory: End of Support on 30.11.2026
+With new details on Unraid 8 now available, it felt like the right time to make a final decision about this plugin and set clear expectations. I've been focused on new things for a while and am preparing the transition of my own infrastructure, so I can no longer give the plugin the attention and love it deserves. It wasn't an easy choice, but support will end on 30.11.2026. From that date, the plugin stays installable as-is, but without any guarantee of stability or usability, so use is entirely at your own risk. The repository will be archived, but if a future Unraid release is reported to break the plugin in the support thread, I'll have to cap the maximum supported version and prevent further installs from that version onwards. Forks are very welcome; just coordinate with the Community Applications maintainers. Thank you all for the support over the years - Unraid has been an amazing community to serve, and I hope to stay in touch with many of you on the forums or Discord.
+###2026.10.15
+- fix: keep a hung upsd from exhausting PHP workers (thanks Joly0)
+###2026.10.06
+- announce maintenance mode (no functional changes)
+###2026.06.18
+- fix: UPS not turning off in newer OS versions
+###2026.04.13
+- new: preview backend updated (to nut master 0e051f9)
+- new: default backend updated (nut 2.8.4 to nut 2.8.5)
+- new: previous backend updated (nut 2.8.3 to nut 2.8.4)
+- new: release backend updated (nut 2.8.2 to nut 2.8.3)
+- default backend: "default" users wishing to stay on 2.8.4 should switch to "previous" before updating,
+- default backend: for this you just set the backend setting to "previous" and then update (no reinstall/reboot).
+- other backends: if you want to stay on your current version, switch to respective older backend before updating,
+- other backends: only exception being the "release" branch where nut 2.8.2 is now deprecated and no longer offered.
+###2025.12.21
+- fix: allow negative values for some fields in GUI
+###2025.11.10
+- new: preview backend updated to nut master f8ecd52
+###2025.11.01b
+- new: allow a port to be added to IP address in manual and slave modes
+- new: mitigation for protocol issues with UniFi UPS devices (fallback mode)
+- new: always show NUT mode and IP settings regardless of mode (for GUI configuration)
+- fix: raise the timeout on debug package generation to account for longer IO-caused delays
+- note: UniFi NUT may need auth disabled, IP:Port and any (random) credentials on Unraid side
+###2025.09.07
+- new: preview backend updated to nut master 009fbbd
+- new: libmodbus updated to release v3.1.11+rtu_usb-NUTv2.8.4
+###2025.09.06
+- fix: resolved malformed runtime variables breaking dashboards in GUI
+###2025.08.27
+- fix: resolved timing issue with runtime-based shutdown logic
+- fix: refactored and modernized shutdown logic with additional logs
+- fix: added hard timeout for sending OS notifications during power events
+- fix: added fallback mechanism when encountering malformed shutdown settings
+- fix: added additional variable validation for frontend settings inside GUI
+- new: added IP address of UPS to OS notifications sent for power events
+###2025.08.25
+- fix: suppress "service not gracefully stopped" warnings in slave mode
+- fix: allow up to 3 hours for shutdown timers to account for larger batteries
+###2025.08.21a
+- fix: make pages and dashboards compliant with new responsive UI
+###2025.08.12
+- fix: adhere to recommended practice for beta footer placement
+###2025.08.11
+- fix: footer no longer appearing in latest OS beta version
+- new: preview backend updated (to nut master 541c2ec)
+- new: default backend updated (nut 2.8.3 to nut 2.8.4)
+- new: previous backend updated (nut 2.8.2 to nut 2.8.3)
+- new: release backend updated (nut 2.8.1 to nut 2.8.2)
+- default backend: "default" users wishing to stay on 2.8.3 should switch to "previous" before updating,
+- default backend: for this you just set the backend setting to "previous" and then update (no reinstall/reboot).
+- other backends: if you want to stay on your current version, switch to respective older backend before updating,
+- other backends: only exception being the "release" branch where nut 2.8.1 is now deprecated and no longer offered.
+- release note: other minor visual problems in latest OS beta are known and will eventually be improved with OS stable releases.
+###2025.05.21c
+- new: the default backend was re-built from the final release version from the NUT website
+- new: the preview (latest build) backend was updated to the most recent master branch as of 21.05.2025
+###2025.04.29a
+- new: added more advanced control over the nominal power display overrides (see helptexts)
+- new: added a setting to control if a calculated load percentage should be based on W or VA
+- new: added a setting to force load percentage calculation if UPS reported value is incorrect
+###2025.04.10a
+- new: preview backend updated (to nut master 3c218a3)
+- new: default backend updated (nut 2.8.2 to nut 2.8.3)
+- new: previous backend updated (nut 2.8.1 to nut 2.8.2)
+- new: release backend updated (nut 2.8.0 to nut 2.8.1)
+- default backend: "default" users wishing to stay on 2.8.2 should switch to "previous" before updating,
+- default backend: for this you just set the backend setting to "previous" and then update (no reinstall/reboot).
+- other backends: if you want to stay on your current version, switch to respective older backend before updating,
+- other backends: only exception being the "release" branch where nut 2.8.0 is now deprecated and no longer offered.
+###2025.02.26
+- fix: future-proofing changes to base plugin structure
+###2025.01.30
+- new: the preview (latest build) backend was updated to the most recent master branch as of 30.01.2025
+###2025.01.22
+- fix: resolved issue with transition between dashboard and settings
+###2024.12.07
+- new: show description of UPS variables when hovered over inside NUT Details table
+- new: introduced a setting to persist redirected NUT service logs over system reboots
+- new: introduced buttons to download and delete redirected NUT service logs from GUI
+- fix: refactored scripting hooks into the system shutdown routines for improved resilience
+###2024.12.02
+- new: added setting to redirect all NUT service output to a separate logfile
+- fix: refined logic around NUT syslog filters and rotating of produced logfiles
+###2024.10.17
+- fix: address page layout breaking displaying more than 2 slaves
+- fix: support for floating-point UPS variables (thanks to edusteinhorst)
+- fix: added further clarifications for new "NUT Connected Clients" settings
+- new: show active UPS alarms also in the dashboards and on the "NUT Settings" page
+###2024.10.15
+- fix: major refactor of the frontend code and frontend-backend communication
+- fix: improved the error handling when communication with backend scripts fails
+- new: when in NUT netserver mode, show connected clients in GUI (settings/footer)
+- new: ups.alarm variables are now colored on the NUT settings page for more visibility
+- new: reworked the NUT footer to display information in a more organized and improved manner
+- new: reworked severity of reported UPS statuses and dropped TRIM, BOOST, OL DISCHRG down to green
+- new: introduced handling of reported UPS statuses for previously unhandled ALARM, HE and ECO statuses
+###2024.10.09
+- fix: no longer scroll down automatically the "NUT Settings" page
+###2024.10.08
+- new: introduced a setting to disable the "NUT Commands" module
+- fix: moved "NUT Commands" and "NUT Statistics" to "Utilities" area of "Settings"
+###2024.09.16
+- new: the preview (latest build) backend was updated to the most recent master branch as of 16.09.2024
+- new: moved "NUT Command Center" to seperate page (shown when NUT is running) for better logical separation
+- new: do not show "powertop" warning in GUI as that is included in any user-generated debug packages anyway
+- fix: reworked certain bash scripts to better standards with more safety for strange configurational states
+###2024.09.13
+- important fix: address possible flock condition causing installation script to stall (thanks AgentXXL)
+###2024.09.12a
+- fix: made optical changes regarding wording, positioning and helptexts on the NUT Settings page
+- fix: refactored some minor code parts in the backend bash scripts to better standards and less verbosity
+- new: use of plugin usage metric functions to aid plugin (UPS driver) development and planning (toggleable)
+- new: the preview (latest build) backend was updated to the most recent master branch as of 12.09.2024
+###2024.09.07
+- new: added "NUT Command Center" in GUI to execute software-based commands on supported UPS devices
+- fix: removed some legacy CSS stylesheets and re-factored minor outdated code passages to better standards
+###2024.09.06
+- new: the preview (latest build) backend was updated to the most recent master branch as of 06.09.2024
+- new: custom scripting to execute commands when a UPS status is encountered (see GUI configuration editor)
+- fix: reduced loading time of NUT Settings page by outsourcing functions from PHP to JavaScript where possible
+- fix: refactored UPS status handling routines to be more efficient and resilient when encountering null values
+###2024.08.14
+- new: the preview (latest build) backend was updated to the most recent master branch as of 14.08.2024
+- fix: the preview backend now includes the final fix for the APC BX series issues (merged NUT GitHub PR #2565)
+###2024.08.07
+- new: the preview (latest build) backend was updated to the most recent master branch as of 07.08.2024
+- fix: the preview backend additionally includes a prospective fix for the APC BX series issues (NUT GitHub PR #2565)
+- release note: please report back on the Unraid forums if the preview backend resolves any APC BX series issues (or not)
+###2024.07.27
+- new: added GUI settings to configure SNMP version and MIB
+- new: scanning mechanisms and auto configure now also detect SNMP devices
+- fix: refactored some legacy code in the backend bash scripts to better standards
+###2024.06.23
+- fix: renamed generic function names to avoid declaration collisions with other plugins
+###2024.05.05
+- new: the preview (latest build) backend was updated to the most recent master branch as of 05.05.2024
+- new: minified the GUI dependencies to reduce the package size and also the page load times within the GUI
+- fix: minor fixes across shell scripts regarding process selecting and handling of generated debug packages
+###2024.04.03
+- fix: important changes to plugin removal routine to also remove any active rule-based syslog filters
+- fix: made optical changes regarding wording, positioning and helptext of the rule-based syslog filters
+- new: added a possibility to view the NUT spam-log from the GUI when rule-based syslog filters are active
+###2024.04.02
+- new: default backend updated from previous NUT 2.8.1 stable release to new NUT 2.8.2 stable release
+- new: added a new "previous" backend for users wishing to remain on the previous NUT 2.8.1 stable release
+- new: added a setting to filter specific repetitive UPS connection events from the SYSLOG to reduce spamming
+- fix: overhauled logging of NUT start, stop and restart for better diagnosis of occuring errors through SYSLOG
+- fix: added a warning symbol for any NUT passwords using special characters as this caused issues for some users
+- fix: dropped some legacy code and hardened GUI code some more against Cross-Site Scripting (XSS) vulnerabilities
+- fix: streamlined configuration file layouts for better readability and following of layouts advised in NUT manuals
+- fix: added txt file extension to most files in NUT debug package for better readability on the go (on mobile devices)
+###2024.03.28
+- new: shortened UPS statuses removing some previous lengthy explanations for better dashboard displaying
+- new: present the dynamic output power factor in the dashboards instead of the static nominal power factor
+- new: when NUT debug package is requested for download by user, also include standard anonymized diagnostics
+- new: in case of important messages from the plugin maintainers, such will now be displayed in the NUT settings
+- fix: minor modifications to debug package now also blacking out any serial numbers in UPS configuration file
+###2024.03.26
+- fix: relax strict legacy UPS name standards to also allow hyphens in the UPS name (not recommended)
+- fix: cleaned up legacy code surrounding the NUT configuration editor and updated related dependencies
+- fix: minor code revisions and quality of life improvements surrounding configurations and some legacy code
+###2024.03.16
+- fix: safeguards against unwarranted shutdowns w/ null responses from upsc (thanks: danielb7390)
+###2024.03.10
+- fix: no longer overwrite configuration files with static, non-changing information over and over
+- fix: improved transparency in configuration files as to which lines are reserved and overwritten
+- fix: improved safeguards against failing file operations when shifting around configuration files
+###2024.03.04
+- release note: it is advised to update to this version before updating your system to UNRAID 6.13+
+- new: important changes in NUT configuration layouts and backends for future UNRAID versions 6.13+
+- new: add the UPS status and battery charge to non-collapsed miniature dashboard for better overview
+- fix: changed to more descriptive and consistent notification messages regarding all UPS power events
+- fix: changed severity level of some UPS states to be more visible in GUI, particularly a UPS on battery
+- fix: major overhaul and fixes of NUT notification service for reliable power event information and logs
+- fix: UPS overload now colors the actual power consumed to red color instead of the nominal power of UPS
+###2024.03.01
+- fix: bugfixes across the GUI and preparations for future UNRAID versions 6.13+
+###2024.02.28
+- new: implement USB diagnostics and override for USB device power management
+- new: implement checks for common power management related problems in debug package
+###2024.02.27
+- new: implement NUT device scanner into GUI for easier selection of UPS drivers
+- new: include more information about system detected USB devices in debug package
+- fix: reduce any unnecessary upsmon process forking to consume less system resources
+- fix: minor cosmetic changes in GUI regarding the positioning of the NUT command buttons
+- fix: detect presence of "powertop" package and warn user about related complications in GUI
+###2024.02.23
+- new: detect if APCUPSD is also running alongside NUT and warn user about related complications in GUI
+- new: the preview (latest build) backend was updated to the most recent master branch as of 23.02.2024
+- fix: minor quality of life improvement regarding the handling of legacy code causing warning messages
+- fix: minor cosmetic GUI changes related to the positioning of warning messages for the user to notice
+###2023.12.11
+- fix: allow setting the UPS Name in manual configuration mode so that GUI dashboards are populated
+- new: the preview (latest build) backend was updated to most recent master branch as of 11.12.2023
+###2023.11.24
+- new: added a warning to the "Auto Config" tool explaining its scope and intended function
+- new: added a shutdown mode "None (the UPS decides)" which waits for LB event before shutdown
+- new: the preview (latest build) backend was updated to most recent master branch as of 24.11.2023
+###2023.11.08
+- fix: important backend and backend switch preparations for future UNRAID versions 6.13+
+- new: preview (latest build) backend updated to most recent master branch as of 08.11.2023
+###2023.11.06
+- new: minor optimizations, re-factorings and overall quality of life improvements
+###2023.11.01
+- new: default backend pinned to NUT 2.8.1 stable release, no more frequent backend changes from here
+- new: users who want all bleeding-edge changes can select "preview (latest build)" as backend instead
+- new: the previous update warning is no longer in effect for the default backend (as it is pinned now)
+- new: unsuccessful start of NUT services is now shown as an error message in the GUI pointing to logs
+- new: NUT environment variables are now in effect to reduce spamming of some diagnostic/debug messages
+###2023.10.28
+- fix: cleaned up all code files in preparation of the NUT 2.8.1 stable backend currently in the works
+- fix: reworked the GUI visibility toggles so that all mode-unrelated settings are now hidden from GUI
+- fix: prevent the SNMP driver from holding up the rest of the boot process under some rare circumstances
+###2023.10.24
+- new: default backend updated to master branch as of 24.10.2023 (w/bugfix: no-comm shutdown as slave)
+###2023.10.22
+- new: default backend updated to master branch as of 22.10.2023 (w/bugfix for APC periodic shutdown)
+- new: updated libmodbus package to support new MODBUS driver for APC devices (Serial, USB or TCP)
+- new: improved NUT scanner feature to improve auto detection and configuration of UPS devices
+- new: introduced a configuration mode where users can use a custom ups.conf file and GUI settings
+- fix: off-loaded new NUT dashboard from unrelated GUI pages to reduce load and page loading times
+- fix: no longer show the NUT runtime statistics module settings on systems without support for it
+###2023.10.19
+- new: introduced GUI setting for UPS reporting minutes instead of seconds for battery runtime left
+- fix: major bugfixes and re-factoring of outdated code (particularly for front-page NUT dashboards)
+- fix: dashboard no longer expands randomly when collapsed, now respects user visibility settings
+- fix: dashboard no longer shows on front page and takes up space when NUT itself is not running
+- fix: refactored the automatic refreshing functions and clarified the scope of their settings in GUI
+- fix: minor bugfixes across the NUT settings and the UPS time calculation/measurement functions
+###2023.10.12a
+- new: option to raise the debug level on UPS driver and NUT monitor for diagnostic purposes
+- new: option to export an extensive (anonymized) NUT debug package for diagnostic purposes
+- new: added some additional USB-based UPS drivers to GUI dropdown for improved accessibility
+- new: also install the libmodbus libraries on 6.10+ as they are required by some UPS drivers
+- fix: minor cosmetic changes in GUI and GUI documentation texts
+- fix: increase maximum allowed field length for UPS port to more reasonable value
+###2023.10.06
+- new: default backend updated to most recent master branch as of 06.10.2023 (upstream bugfixes)
+- new: default 6.13+ backend updated to most recent master branch as of 06.10.2023 (upstream bugfixes)
+###2023.09.26
+- new: stats module: hide stats module pages when deactivated (thanks to ich777)
+- new: compute UPS load from power variables when not reported by UPS (where possible)
+###2023.09.23
+- new: default backend updated to most recent master branch as of 23.09.2023 (upstream bugfixes)
+###2023.09.17a/b
+- fix: stats module: updated override helptext with correct way to disable an unneeded chart (disable, not disabled)
+- fix: stats module: minor bugfixes for better handling of user misconfigurations
+###2023.09.17
+- new: default backend updated to most recent master branch as of 17.09.2023 (upstream bugfixes)
+- new: stats module: off-loaded the charts to a seperate page for performance and preventing configuration dead-lock
+- new: stats module: users can now set their own variables and descriptions for charts via variable override
+- new: stats module: users can now disable individual unneeded charts via variable override
+- new: stats module: users can now set the polling/updating frequency (how often the charts update)
+- fix: reworked all bash scripts to better standards with more safety for strange configurational states
+###2023.09.15
+- new: runtime statistics module introduces fancy charts for UPS variables in GUI (on 6.12.3+)
+- fix: configuration mismatch in rare cases when resetting configuration via GUI
+- fix: security fixes and runtime statistic charts now respecting theme settings (thanks to Peuuuur Noel)
+###2023.09.14
+- new: major refactor of GUI setting ordering, descriptions and help-texts
+- new: default backend updated to most recent master branch as of 14.09.2023
+###2023.09.11
+- new: allow user to choose older NUT backend in case of UPS problems (on 6.10+)
+###2023.09.10
+- fix: refactored old code for PHP8 to minimize PHP warnings
+- fix: minor bugfixes across the GUI/frontend
+###2023.09.07
+- fix: do not approximate current VA when it is reported correctly by UPS
+###2023.09.02
+- new: act on user configured notification triggers
+- fix: improve logging for GUI actions
+###2023.08.29
+- new: user configuration now persists between reinstalls of the plugin
+- new: added a button to GUI to reset all configuration files to their defaults
+- new: defined safe zones for additional settings in the configuration files
+- fix: clarified reload button in GUI some more for understanding what it does
+- fix: minor changes in how copy operations of configuration files are handled
+- fix: run UPS inverter poweroff also as root to avoid driver permission issues
+- fix: nut scanner is now no longer breaking user configuration files
+###2023.08.28
+- new: refactored handling of permissions and wording of log messages
+- new: refactored and decluttered installation, upgrading and removal processes
+- new: improved upgrading process making sure all existing NUT services are stopped first
+- new: compiled backend NUT package from current GitHub master branch (as of 26.08.2023)
+- new: optimized backend NUT package to use folder structure of earlier releases
+- new: added official Slackware Net-SNMP package with OpenSSL 3.1.2 for future UNRAID versions 6.13+
+- new: added backend NUT package compiled with OpenSSL 3.1.2 for future UNRAID versions 6.13+
+###2023.08.24
+- new: compiled backend NUT package from current master branch (as of 24.08.2023)
+###2023.07.26
+- fix: reduce console spam of copy operations by redirecting output to /dev/null, as requested in 2023.07.21 #3 (comment)
+- fix: stop services before a plugin upgrade on the live system to remove any file locks preventing files from getting patched on the running instance. a reboot should now no longer be required for all changes
+- fix: old installation remnants cause updating or transitioning to another nut package on running instance to fail
+- fix: fix a permissions issue causing some drivers in 2.8.0 not to have access to their required folders
+- new: add button for users to be able to save their UPS details into a dummy-ups compliant diagnostics file
+  this file can then be uploaded on the forums and given to the developers in case problems with the plugin arise
+  thanks to @Peuuuur-Noel for the improvements to the privacy of the exported files (removing serial, macaddr)
+- Looks like the Tooltipster js lib was broken due to duplicate "copyright" id in footer code.
+- fix Removed #copyright from footer and applied CSS directly to the element.
+
+        Thanks to forum member Peuuuur Noel and Rysz for the PRs.
+###2023.07.24a
+- fix override realpower if realpower nominal set manually
+- simplification of realpower/apparent power if value set manually
+- used U+2009 to separate number and unit (W/VA)
+- remove obsolete lowbatt fail-safe
+        Thanks to forum member Peuuuur Noel and Rysz for the PRs.
+###2023.07.23a
+- fix: updated code for better calculation and display (in settings/footer/dashboard) between apparent power, real/true power and data available from NUT
+- add: display power factor in settings page
+- add: use ups.realpower if available
+
+          Thanks to forum member Peuuuur Noel  for the PR.
+###2023.07.22
+- fix: persist config files when rebooting
+- add: implement lowbatt event fail-safe in settings
+- add: always pull-in latest config files on reinstall/upgrade
+- add: implement battery replacement notification in settings
+
+        Thanks to forum member Rysz for the PR.
+###2023.06.03
+- Add Small footer style thanks ich777 for the PR.
+###2023.02.14
+-6.12 Dashboard support
+-PHP8 fixes
+-Refresh option.
+###2022.03.20
+-fix for filetree top level
+-update nut footer
+###2021.01.08
+- fix plugin package permissions
+- cybrnook -update help text to reflect minutes
+###2020.05.16
+- gfjardim - Show dashboard even if footer is disabled
+###2020.05.11
+- update nut package for 6.8
+###2020.03.17
+- gfjardim - added footer and dashboard plus many other tweaks
+###2019.02.03
+- update all icons to fa icons
+- fix editor font in black theme
+###2019.01.24
+- update settings icon to fa font
+###2018.11.25
+- add autov to css and js
+- build nut package from usblib-1.0 branch
+- remove support link from readme
+###2018.05.09
+- fix Autodetect
+- fix null port error
+###2018.04.29
+- fix rc script interfering with cupsd
+- fix Run time in red only when on battery thanks @realies
+- compile nut-2.7.4.20180429 libusb 1.0+0.1 branch for 6.5 added patch for wait and retry
+###2018.01.16
+- tweak notification event and subject
+###2018.01.14
+- fix nut power showing 0
+###2018.01.09
+- update nut package to 2.7.4 2017.11.29 commit fd7189d
+- revert Eaton use-case since it is included in nut package
+- add ups va and watt capacity inputs for ups that do not present real power nominal
+###2018.01.06
+- add Eaton use-case to improve load accuracy thanks @realies
+###2018.01.03
+- fix load for ups with ups.power.nominal vs ups.realpower.nominal
+###2017.11.29
+- fix permissions so nut conf are not world readable
+- fix nut-scanner options, only scan usb for auto config
+###2017.11.26
+- fix plugin install service starting when disabled
+###2017.11.25
+- fix snmp port input box length and add ip mask
+###2017.11.03
+- update killpower flag
+- update permissions and security for nut configs
+- change username and password variables
+- add slave user and password
+###2017.10.28
+- downgrade nut package to 2.7.4 due to usb resets in 6.4rc10b
+###2017.10.10
+- fix ipaddr filter
+- update input masks for ipaddr, name and username
+###2017.10.08a
+- fix move old pids to new location
+- compile nut package to latest commit 2017.09.21
+- fix: new nut package uses /etc/nut and /var/run/nut
+###2017.10.05
+- fix add username and password to upsd users
+- add autorefresh to editor to fix line number placement
+- move cdnjs to local
+- update support for new themes
+###2017.09.17
+- add ability to change UPS Monitor Name, User and Password
+- update icons
+###2017.06.17a
+- add support for 6.4 themes
+###2017.06.04
+- add net-snmp package
+###2017.05.27
+- add autodetection for UPS
+- fix ip mask
+###2017.05.26
+- add master/slave options
+- fix runtime display format
+###2017.05.24
+- add dropdown options for battery and timers
+- add killpower flag condition to shutdown script
+###2017.05.22
+- fix shutdown scripts
+- move default nut conf files
+###2017.05.20
+- fix manual config  settings
+###2017.05.19
+- fix reload button
+- add start conditions to rc script
+###2017.05.17
+- add manual mode, reload and config editor to settings page
+- reformat settings page, hide unused vars
+- add vars, rewrite, combine and move scripts
+- add snmp settings from Ambrotos fork - untested
+- add UPS summary, UPS details page and dashboard page
+- add dynamix plugin api
+- remove depreciated code
+- restructure and repackage plugin
+- rename nut plugin package to difer from nut package
+
+###2015.09.19###
+- UPS statistics now auto updates(every two seconds)
+
+###2015.08.24###
+- added launch from plugins(saarg)
+
+###2015.08.23###
+- added blazer_ser to drivers
+
+###2015.08.23###
+- Public Release
+- Fix, Restart on upgrades
+
+###2015.08.22###
+- Uninstall fixes
+- Fix autorestart after upgrade
+- Make USB drivers selectable
+- Add shutdown on battery levels
+- Remove user/password and hardcode them (see plugin help)
+- Moved scripts to plugin folder for 6.1 (ln -s rc.nut)
+
+###2015.08.21###
+- Initial Release
+- Test Version (plg)
+</CHANGES>
+
+<!--
+stop already existing services before doing anything
+-->
+<FILE Run="/bin/bash">
+<INLINE>
+echo "Checking for other installed NUT versions..."
+if [ -f /boot/config/plugins/nut.plg ] || [ -f /boot/config/plugins/nut-2.8.0.plg ]; then
+    echo ""
+    echo "-----------------------------------------------------------"
+    echo "ERROR: YOU ALREADY HAVE ANOTHER VERSION OF NUT INSTALLED."
+    echo "Please make note of your configuration and uninstall any existing NUT packages."
+    echo "-----------------------------------------------------------"
+    echo ""
+    exit 1
+fi
+
+echo "Making sure all existing NUT services are stopped (before install/upgrade)..."
+if [ -x /etc/rc.d/rc.nut ]; then
+    if ! /etc/rc.d/rc.nut stop >/dev/null 2>&amp;1; then
+        echo "WARNING:"
+        echo "WARNING: The NUT installation script was not able to stop all NUT services gracefully."
+        echo "WARNING: IN CASE OF PROBLEMS, please REBOOT YOUR SYSTEM to complete any upgrades."
+        echo "WARNING:"
+    fi
+    killall nut-poller >/dev/null 2>&amp;1
+fi
+
+if [ -x /etc/rc.d/rc.nutstats ]; then
+    if ! /etc/rc.d/rc.nutstats disable >/dev/null 2>&amp;1; then
+        echo "WARNING:"
+        echo "WARNING: The NUT installation script was not able to stop all NUT statistic services gracefully."
+        echo "WARNING: IN CASE OF PROBLEMS, please REBOOT YOUR SYSTEM to complete any upgrades."
+        echo "WARNING:"
+    fi
+fi
+
+echo ""
+exit 0
+</INLINE>
+</FILE>
+
+<!--
+replace the nut-dw plugin (this plugin's previous name), keeping its settings
+-->
+<FILE Run="/bin/bash">
+<INLINE>
+# Migrate from nut-dw (tests/e2e/harness.py runs this block)
+OLD=/boot/config/plugins/nut-dw
+if [ -d "$OLD" ] &amp;&amp; [ ! -f &plgPATH;/&name;.cfg ]; then
+    echo "Moving the settings of the nut-dw plugin to &name;..."
+    mkdir -p &plgPATH; || exit 1
+    for f in "$OLD"/*; do
+        # cached packages are downloaded again
+        case "$f" in *.txz|*.md5|*.asc) continue ;; esac
+        cp -rf "$f" &plgPATH;/ || { echo "ERROR: copying $f failed, the nut-dw plugin was left in place."; exit 1; }
+    done
+    [ ! -f &plgPATH;/backup/legacy/nut-dw.cfg ] || mv -f &plgPATH;/backup/legacy/nut-dw.cfg &plgPATH;/backup/legacy/&name;.cfg || exit 1
+    # the settings file last: its presence marks the migration as done
+    [ ! -f &plgPATH;/nut-dw.cfg ] || mv -f &plgPATH;/nut-dw.cfg &plgPATH;/&name;.cfg || exit 1
+fi
+if [ -e "$OLD" ] || [ -e /boot/config/plugins/nut-dw.plg ] || [ -e /usr/local/emhttp/plugins/nut-dw ]; then
+    echo "Removing the nut-dw plugin, which &name; replaces..."
+fi
+rm -f /boot/config/plugins/nut-dw.plg /var/log/plugins/nut-dw.plg
+rm -rf /usr/local/emhttp/plugins/nut-dw "$OLD"
+echo ""
+</INLINE>
+</FILE>
+
+<!--
+migrate the configuration layout of the plugin before nut-dw (/boot/config/plugins/nut)
+-->
+<FILE Run="/bin/bash">
+<INLINE>
+if [ ! -f &plgPATH;/migration-failed ] &amp;&amp; [ -d /boot/config/plugins/nut-old ]; then
+    rm -rf /boot/config/plugins/nut-old
+fi
+
+if [ -d /boot/config/plugins/nut ] &amp;&amp; [ ! -d &plgPATH; ]; then
+    MIGRATIONFAILED="NO"
+    echo "Now migrating previous NUT configuration layout to new NUT configuration layout..."
+
+    mkdir -p &plgPATH; 2>&amp;1 || MIGRATIONFAILED="YES"
+    cp -rf /boot/config/plugins/nut/* &plgPATH;/ 2>&amp;1 || MIGRATIONFAILED="YES"
+    mv -f &plgPATH;/nut.cfg &plgPATH;/&name;.cfg 2>&amp;1 || MIGRATIONFAILED="YES"
+    [ -d &plgPATH; ] 2>&amp;1 || MIGRATIONFAILED="YES"
+    [ -f &plgPATH;/&name;.cfg ] 2>&amp;1 || MIGRATIONFAILED="YES"
+
+    if [ "$MIGRATIONFAILED" == "YES" ]; then
+        echo "WARNING:"
+        echo "WARNING: The NUT installation script was not able to migrate your NUT configuration to the new layout."
+        echo "WARNING: For NUT to remain functional it will be necessary to start with a fresh configuration instead."
+        echo "WARNING:"
+        echo "WARNING: The previous NUT configuration remains untouched at this location: /boot/config/plugins/nut-old"
+        echo "WARNING: You can use old configuration for reference, but try to set up NUT with the fresh configuration."
+        echo "WARNING:"
+        echo "WARNING: === Steps for Manual Migration of Configuration Layout (For Advanced Users / Not Recommended) ==="
+        echo "WARNING: 1. Uninstall NUT"
+        echo "WARNING: 2. Rename Folder [/boot/config/plugins/nut-old] to [&plgPATH;]"
+        echo "WARNING: 3. Rename File [&plgPATH;/nut.cfg] to [&plgPATH;/&name;.cfg]"
+        echo "WARNING: 4. Reinstall NUT"
+        echo "WARNING:"
+        echo "Now reverting to fresh NUT configuration..."
+        rm -rf &plgPATH;
+        mkdir -p &plgPATH;
+        find /var/log/packages/ -type f -iname "nut*" -exec removepkg {} \;
+        rm -rf /usr/local/emhttp/plugins/nut
+        rm -rf &emhttp;
+        rm -rf /etc/nut
+        rm -rf /etc/ups
+        rm -rf /var/run/nut
+        rm -rf /var/state/ups
+        rm -rf /etc/nutstats
+        if [ -f /boot/config/plugins/dynamix/nutstats.cron ]; then
+            rm -f /boot/config/plugins/dynamix/nutstats.cron
+            sleep 1
+            update_cron
+            sleep 1
+        fi
+        touch &plgPATH;/migration-failed 2>&amp;1
+    else
+        echo "Your NUT configuration layout has been successfully migrated to the new NUT configuration layout."
+        touch &plgPATH;/migration-complete 2>&amp;1
+    fi
+    rm -f /boot/config/plugins/nut/*.md5
+    rm -f /boot/config/plugins/nut/*.txz
+    mv -f /boot/config/plugins/nut /boot/config/plugins/nut-old
+fi
+echo ""
+exit 0
+</INLINE>
+</FILE>
+
+<!-- default and preview: built by .github/workflows/native-nut.yml from a pinned NUT master commit -->
+<FILE Name="&plgPATH;/&nutNAME;.txz" Min="7.3.4">
+<URL>&pkgURL;/&nutNAME;.txz</URL>
+<MD5>&nutMD5;</MD5>
+</FILE>
+
+<!-- slack15.1 previous -->
+<FILE Name="&plgPATH;/nut-2.8.4-x86_64-1stable.ssl31.txz" Min="6.13">
+<URL>&pkgURL;/nut-2.8.4-x86_64-1stable.ssl31.txz</URL>
+<MD5>4b04534067a073aa958376ecb2a78fd2</MD5>
+</FILE>
+
+<!-- slack15.1 stable -->
+<FILE Name="&plgPATH;/nut-2.8.3-x86_64-2stable.ssl31.txz" Min="6.13">
+<URL>&pkgURL;/nut-2.8.3-x86_64-2stable.ssl31.txz</URL>
+<MD5>5bccace36c95a83c0c100cb0c1fe3a69</MD5>
+</FILE>
+
+<!-- slack15.1 legacy -->
+<FILE Name="&plgPATH;/nut-2.7.4.20200318-x86_64-1.txz" Min="6.13">
+<URL>&pkgURL;/nut-2.7.4.20200318-x86_64-1.txz</URL>
+<MD5>52de2867d6b8f6bc1a98a45870b05420</MD5>
+</FILE>
+
+<!-- slack15.1 backend switch -->
+<FILE Min="6.13" Run="/bin/bash">
+<INLINE>
+CONFIG=&plgPATH;/&name;.cfg
+DEFAULTPKG=&plgPATH;/&nutNAME;.txz
+PREVIEWPKG=&plgPATH;/&nutNAME;.txz
+if [ -e "$CONFIG" ]; then
+    source "$CONFIG"
+    if [ "$BACKEND" == "preview" ]; then
+        echo "Installing user-configured PREVIEW backend for NUT..."
+        upgradepkg --install-new "$PREVIEWPKG"
+    elif [ "$BACKEND" == "default" ]; then
+        echo "Installing DEFAULT backend for NUT..."
+        upgradepkg --install-new "$DEFAULTPKG"
+    elif [ "$BACKEND" == "previous" ]; then
+        echo "Installing user-configured PREVIOUS backend for NUT..."
+        upgradepkg --install-new &plgPATH;/nut-2.8.4-x86_64-1stable.ssl31.txz
+    elif [ "$BACKEND" == "stable" ]; then
+        echo "Installing user-configured STABLE backend for NUT..."
+        upgradepkg --install-new &plgPATH;/nut-2.8.3-x86_64-2stable.ssl31.txz
+    elif [ "$BACKEND" == "legacy" ]; then
+        echo "Installing user-configured LEGACY backend for NUT..."
+        upgradepkg --install-new &plgPATH;/nut-2.7.4.20200318-x86_64-1.txz
+    else
+        echo "Installing DEFAULT backend for NUT..."
+        upgradepkg --install-new "$DEFAULTPKG"
+    fi
+else
+    echo "Installing DEFAULT backend for NUT..."
+    upgradepkg --install-new "$DEFAULTPKG"
+fi
+echo ""
+</INLINE>
+</FILE>
+
+<!-- dependency packages -->
+<FILE Name="&plgPATH;/net-snmp-5.9.4-x86_64-1.txz" Min="6.13" Run="upgradepkg --install-new">
+<URL>&pkgURL;/net-snmp-5.9.4-x86_64-1.txz</URL>
+<MD5>df3f30cdb8680f79ca8f2d1ecf77a156</MD5>
+</FILE>
+
+<FILE Name="&plgPATH;/libmodbus-3.1.11-x86_64-1nut_slack15.1.txz" Min="6.13" Run="upgradepkg --install-new">
+<URL>&pkgURL;/libmodbus-3.1.11-x86_64-1nut_slack15.1.txz</URL>
+<MD5>dc31cd937d3ad7eb7c9280121a45f9b6</MD5>
+</FILE>
+
+<!-- plugin package -->
+<FILE Name="&plgPATH;/&plgNAME;.txz" Min="6.1" Run="upgradepkg --install-new">
+<URL>&gitURL;/archive/&plgNAME;.txz</URL>
+<MD5>&plgMD5;</MD5>
+</FILE>
+
+<!-- installation -->
+<FILE Run="/bin/bash">
+<INLINE>
+CONFIG=&plgPATH;/&name;.cfg
+
+if [ -d /usr/local/emhttp/plugins/nut ]; then
+    echo "Now removing the remaining parts of the previous NUT configuration layout..."
+    rm -rf /usr/local/emhttp/plugins/nut
+fi
+
+# reading our configuration
+echo "Reading NUT configuration..."
+if [ -e "$CONFIG" ]; then
+    source "$CONFIG"
+fi
+
+# determine if config wants NUT services to start
+echo "Determining if NUT services should be started..."
+
+if [ "$MODE" != "slave" ] &amp;&amp; [ "$DRIVER" == "snmp-ups" ]; then
+    if [ "$SERVICE" == "enable" ]; then
+        echo "SNMP driver is configured, starting NUT services in background instead (see SYSLOG)..."
+        at -M now &lt;&lt;&lt; "/etc/rc.d/rc.nut start 2>&amp;1 | logger -t \"rc.nut\""
+    elif [ "$STATISTICS" == "enable" ]; then
+        echo "SNMP driver is configured, starting NUT statistic services in background instead (see SYSLOG)..."
+        at -M now &lt;&lt;&lt; "/etc/rc.d/rc.nutstats check 2>&amp;1 | logger -t \"rc.nutstats\""
+    fi
+else
+    if [ "$SERVICE" == "enable" ]; then
+        echo "Starting NUT services..."
+        /etc/rc.d/rc.nut start 2>&amp;1 | logger -t "rc.nut"
+        if [ "${PIPESTATUS[0]}" -eq 0 ]; then
+            echo "NUT services have been started successfully."
+        else
+            echo "WARNING: NUT services failed to start, check your configuration and the SYSLOG."
+        fi
+    elif [ "$STATISTICS" == "enable" ]; then
+        echo "Starting NUT statistic services..."
+        /etc/rc.d/rc.nutstats check 2>&amp;1 | logger -t "rc.nutstats"
+        if [ "${PIPESTATUS[0]}" -eq 0 ]; then
+            echo "NUT statistic services have been started successfully."
+        else
+            echo "WARNING: NUT statistic services failed to start, check your configuration and the SYSLOG."
+        fi
+    fi
+fi
+
+echo ""
+echo "-----------------------------------------------------------"
+echo " NUT v3 (Network UPS Tools) for UNRAID has been installed."
+echo " Version: &version; / Plugin Maintainer: &author;"
+echo "-----------------------------------------------------------"
+echo ""
+</INLINE>
+</FILE>
+
+<!-- uninstallation -->
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+echo "Making sure all existing NUT services are stopped (before uninstall)..."
+if [ -x /etc/rc.d/rc.nut ]; then
+    if ! /etc/rc.d/rc.nut stop >/dev/null 2>&amp;1; then
+        echo "WARNING:"
+        echo "WARNING: The NUT uninstallation script was not able to stop all NUT services gracefully."
+        echo "WARNING: IN CASE OF PROBLEMS, please REBOOT YOUR SYSTEM to remove any remaining packages."
+        echo "WARNING:"
+    fi
+    killall nut-poller >/dev/null 2>&amp;1
+fi
+
+if [ -x /etc/rc.d/rc.nutstats ]; then
+    if ! /etc/rc.d/rc.nutstats disable >/dev/null 2>&amp;1; then
+        echo "WARNING:"
+        echo "WARNING: The NUT uninstallation script was not able to stop all NUT statistic services gracefully."
+        echo "WARNING: IN CASE OF PROBLEMS, please REBOOT YOUR SYSTEM to remove any remaining packages."
+        echo "WARNING:"
+    fi
+fi
+
+# check if net-snmp is used by another plugin
+if [ "$(find /boot/config/plugins/*.plg -type f ! -iname "*&name;.plg*" | xargs grep "net-snmp" -sl)" ]; then
+    echo "Net-SNMP in use by another plugin, will not be removed with NUT."
+    rm -f &plgPATH;/net-snmp*.txz
+fi
+
+# check if libmodbus is used by another plugin
+if [ "$(find /boot/config/plugins/*.plg -type f ! -iname "*&name;.plg*" | xargs grep "libmodbus" -sl)" ]; then
+    echo "libmodbus in use by another plugin, will not be removed with NUT."
+    rm -f &plgPATH;/libmodbus*.txz
+fi
+
+removepkg &plgPATH;/*.txz
+
+# clean up folders after the removed installation
+# in case of re-installation of package on live system
+
+rm -rf &emhttp;
+rm -f &plgPATH;/*.txz \
+    &plgPATH;/*.md5
+
+rm -rf /etc/nut
+rm -rf /etc/ups
+rm -rf /var/run/nut
+rm -rf /var/state/ups
+
+rm -rf /etc/nutstats
+if [ -f /boot/config/plugins/dynamix/nutstats.cron ]; then
+    rm -f /boot/config/plugins/dynamix/nutstats.cron
+    sleep 1
+    update_cron
+    sleep 1
+fi
+
+RESTARTSYSLOG="NO"
+if [ -f /etc/logrotate.d/nut ]; then
+    rm -f /etc/logrotate.d/nut
+    RESTARTSYSLOG="YES"
+fi
+if [ -f /etc/logrotate.d/nut-spam ]; then
+    rm -f /etc/logrotate.d/nut-spam
+    RESTARTSYSLOG="YES"
+fi
+if [ -f /etc/rsyslog.d/xnut-nospam.conf ]; then
+    rm -f /etc/rsyslog.d/xnut-nospam.conf
+    RESTARTSYSLOG="YES"
+fi
+if [ -f /etc/rsyslog.d/98-nut-nospam.conf ]; then
+    rm -f /etc/rsyslog.d/98-nut-nospam.conf
+    RESTARTSYSLOG="YES"
+fi
+if [ -f /etc/rsyslog.d/99-nut-to-both.conf ]; then
+    rm -f /etc/rsyslog.d/99-nut-to-both.conf
+    RESTARTSYSLOG="YES"
+fi
+if [ -f /etc/rsyslog.d/99-nut-to-file.conf ]; then
+    rm -f /etc/rsyslog.d/99-nut-to-file.conf
+    RESTARTSYSLOG="YES"
+fi
+if [ "$RESTARTSYSLOG" == "YES" ]; then
+    echo "Restarting SYSLOG daemon due to configurational changes for NUT..."
+    sleep 1
+    /etc/rc.d/rc.rsyslogd restart >/dev/null 2>&amp;1
+    sleep 1
+fi
+rm -f /var/log/nut.log
+rm -f /var/log/nut-spam
+rm -f /boot/logs/nut.log
+rm -f /boot/logs/nut-spam
+
+rm -f /etc/cron.daily/nut-poller >/dev/null 2>&amp;1
+
+echo ""
+echo "-----------------------------------------------------------"
+echo " NUT v3 (Network UPS Tools) for UNRAID has been removed."
+echo " Version: &version; / Plugin Maintainer: &author;"
+echo "-----------------------------------------------------------"
+echo ""
+</INLINE>
+</FILE>
+
+</PLUGIN>
