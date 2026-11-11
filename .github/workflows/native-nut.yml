@@ -10,6 +10,7 @@ on:
   push:
     paths:
       - .github/workflows/native-nut.yml
+      - .github/workflows/nut-verify.yml
       - build/**
 
 permissions:
@@ -87,39 +88,15 @@ jobs:
 
   verify:
     needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         unraid: ["7.3.4", "7.4.0"]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: andrebrait/unRAID-NerdTools
-          ref: ${{ env.NERDTOOLS_REF }}
-          path: .nerdtools
-          sparse-checkout: build
-          persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: nut-package
-          path: dist
-      - name: Install archive tools and configure mapped sandbox identities
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes cpio zstd xz-utils squashfs-tools bubblewrap uidmap
-          sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 root
-      - name: Install with upgradepkg into the exact Unraid ${{ matrix.unraid }} root, resolve ELF dependencies, run -V
-        env:
-          PACKAGE: dist/${{ needs.build.outputs.package }}
-          UNRAID: ${{ matrix.unraid }}
-        run: |
-          sudo NERDTOOLS="$PWD/.nerdtools" python3 build/nut_build.py verify \
-            --target "$UNRAID" --package "$PACKAGE" --work /tmp
+    uses: ./.github/workflows/nut-verify.yml
+    with:
+      version: ${{ matrix.unraid }}
+      artifact: nut-package
+      package: ${{ needs.build.outputs.package }}
 
   publish:
     needs: [build, verify]

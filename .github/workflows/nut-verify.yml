@@ -1,0 +1,78 @@
+name: Verify NUT on Unraid
+
+# Installs the NUT package (by default the one nut-dw.plg ships as nutNAME) plus net-snmp/libmodbus into
+# the exact Unraid root, resolves every ELF dependency with that root's loader, and runs the -V and SSL smokes.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Unraid version
+        type: string
+        required: true
+      url:
+        description: Unraid ZIP URL; empty uses the pin in build/nut.json
+        type: string
+        default: ""
+      sha256:
+        description: SHA256 of the Unraid ZIP (required with url)
+        type: string
+        default: ""
+      bzroot-sha256:
+        description: Optional independent SHA256 of the ZIP's bzroot member
+        type: string
+        default: ""
+      artifact:
+        description: Artifact holding a freshly built package; empty verifies the shipped packages/ one
+        type: string
+        default: ""
+      package:
+        description: Package file inside the artifact
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+# Never upload or cache the Unraid image or the extracted roots.
+env:
+  # Must equal the unraid-build-root action pin in native-nut.yml; bootstrap/sandbox modules are reused from it.
+  NERDTOOLS_REF: 2c8cd4c41bc7f378b7fdba2bc20019aa52b5ca16
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: andrebrait/unRAID-NerdTools
+          ref: ${{ env.NERDTOOLS_REF }}
+          path: .nerdtools
+          sparse-checkout: build
+          persist-credentials: false
+      - if: inputs.artifact != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: dist
+      - name: Install archive tools and configure mapped sandbox identities
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes cpio zstd xz-utils squashfs-tools bubblewrap uidmap
+          sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 root
+      - name: Install with upgradepkg into the exact Unraid ${{ inputs.version }} root, resolve ELF dependencies, run -V
+        env:
+          UNRAID: ${{ inputs.version }}
+          URL: ${{ inputs.url }}
+          SHA256: ${{ inputs.sha256 }}
+          BZROOT_SHA256: ${{ inputs.bzroot-sha256 }}
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          args=(--target "$UNRAID" --work /tmp)
+          [[ -z "$URL" ]] || args+=(--url "$URL" --sha256 "$SHA256")
+          [[ -z "$BZROOT_SHA256" ]] || args+=(--bzroot-sha256 "$BZROOT_SHA256")
+          [[ -z "$PACKAGE" ]] || args+=(--package "dist/$PACKAGE")
+          sudo NERDTOOLS="$PWD/.nerdtools" python3 build/nut_build.py verify "${args[@]}"

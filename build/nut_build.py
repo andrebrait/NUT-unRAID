@@ -5,6 +5,7 @@ Reuses NerdTools' pinned bootstrap/sandbox modules (same commit as the unraid-bu
 set NERDTOOLS to that checkout. Requires a disposable Linux x86_64 runner and root.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+
+from release_watch import plg_entity
 
 REPO = Path(__file__).resolve().parent.parent
 LOCK = json.loads((REPO / "build/nut.json").read_text())
@@ -117,11 +120,25 @@ def check(root, command):
     return True, result.stdout + result.stderr
 
 
+def shipped_package():
+    """The package the plugin ships on Unraid 7.3.4+: packages/<nutNAME>.txz from plugin/nut-dw.plg."""
+    path = REPO / "packages" / f"{plg_entity('nutNAME')}.txz"
+    if hashlib.md5(path.read_bytes()).hexdigest() != plg_entity("nutMD5"):
+        raise ValueError(f"{path.name} does not match the nutMD5 in nut-dw.plg")
+    return path
+
+
 def verify(args):
-    target = LOCK["targets"][args.target]
-    package = Path(args.package).resolve()
-    if package.name != package_file():
-        raise ValueError(f"Unexpected package {package.name}")
+    if args.url:
+        if not args.sha256:
+            raise ValueError("--url requires --sha256")
+        target = {"url": args.url, "sha256": args.sha256, "bzroot_sha256": args.bzroot_sha256}
+    elif args.target in LOCK["targets"]:
+        target = LOCK["targets"][args.target]
+    else:
+        raise ValueError(f"Unraid {args.target} has no pinned image; pass --url and --sha256")
+    package = Path(args.package).resolve() if args.package else shipped_package()
+    print(f"Verifying {package.name} on Unraid {args.target}")
     archives = [*runtime_packages(), package]
     work = Path(args.work)
     work.mkdir(parents=True, exist_ok=True)
@@ -131,7 +148,7 @@ def verify(args):
         root = temporary / "root"
         root.mkdir()
         image = {"url": target["url"], "sha256": target["sha256"], "file": f"unRAIDServer-{args.target}-x86_64.zip"}
-        prepare_image(image, args.target, temporary / "inputs", root, target["bzroot_sha256"])
+        prepare_image(image, args.target, temporary / "inputs", root, target.get("bzroot_sha256"))
         staged = root / "tmp/nut-packages"
         staged.mkdir(parents=True)
         for archive in archives:
@@ -184,8 +201,11 @@ def main():
     b.add_argument("--out", required=True)
     b.add_argument("--work", default="/tmp")
     v = sub.add_parser("verify")
-    v.add_argument("--target", required=True, choices=sorted(LOCK["targets"]))
-    v.add_argument("--package", required=True)
+    v.add_argument("--target", required=True, help="Unraid version; a pinned one in nut.json, else give --url/--sha256")
+    v.add_argument("--package", help="package to verify (default: the one nut-dw.plg ships as nutNAME)")
+    v.add_argument("--url", help="Unraid ZIP URL (overrides the nut.json pin)")
+    v.add_argument("--sha256", help="SHA256 of the Unraid ZIP")
+    v.add_argument("--bzroot-sha256", help="optional SHA256 of the ZIP's bzroot member")
     v.add_argument("--work", default="/tmp")
     args = parser.parse_args()
     if sys.platform != "linux" or os.uname().machine != "x86_64" or os.geteuid() != 0:
