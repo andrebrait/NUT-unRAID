@@ -11,6 +11,8 @@
 <!ENTITY plgPATH   "/boot/config/plugins/&name;">
 <!ENTITY plgNAME   "nut-plugin-2026.11.12-x86_64-1">
 <!ENTITY plgMD5    "1ffcdffe4aa429885e9f84135cd7cc16">
+<!ENTITY nutNAME   "nut-2.8.5.1711_g1c4ab78c6-x86_64-1_andrebrait">
+<!ENTITY nutMD5    "89890442501e28b0394a720feefe770d">
 <!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
 ]>
 
@@ -19,6 +21,9 @@
 <CHANGES>
 ## Network UPS Tools (NUT) for UNRAID
 ###2026.11.12
+- security: on Unraid 7.3.4 and newer, the default and preview backends are now NUT built in GitHub Actions from upstream master commit 1c4ab78c6, which includes the fixes for CVE-2026-54161 (upsmon NOTIFYCMD command injection) and CVE-2026-85068 (blazer_usb) and the libusb reconnect hang fix (networkupstools/nut#3448)
+- note: NOTIFYCMD and CMDSCRIPT are now run directly as a single program path, not through a shell; arguments or shell syntax in those settings no longer work
+- note: the netxml-ups, nut-ipmipsu and powerman-pdu drivers are not included in that build because Unraid lacks their libraries
 - important: the plugin now generates the complete NUT configuration from its settings; the manual configuration modes and the configuration editor are gone
 - important: on upgrade your previous configuration files are imported into the settings and custom directive fields; NUT keeps using the previous files until you review the NUT Settings and click Apply, and conflicting directives must be resolved first
 - important: the default upsd admin user (admin/adminpass) is no longer created; set a NUT Admin Username and Password in the NUT Settings to use NUT Commands
@@ -585,16 +590,22 @@ exit 0
 </INLINE>
 </FILE>
 
-<!-- slack15.1 preview -->
-<FILE Name="&plgPATH;/nut-2.8.5-x86_64-1master.ssl31.txz" Min="6.13">
+<!-- slack15.1 preview (Unraid before 7.3.4) -->
+<FILE Name="&plgPATH;/nut-2.8.5-x86_64-1master.ssl31.txz" Min="6.13" Max="7.3.3.99">
 <URL>&pkgURL;/nut-2.8.5-x86_64-1master.ssl31.txz</URL>
 <MD5>59a93b0f7653d23e4323c2261b1f1429</MD5>
 </FILE>
 
-<!-- slack15.1 default -->
-<FILE Name="&plgPATH;/nut-2.8.5-x86_64-1stable.ssl31.txz" Min="6.13">
+<!-- slack15.1 default (Unraid before 7.3.4) -->
+<FILE Name="&plgPATH;/nut-2.8.5-x86_64-1stable.ssl31.txz" Min="6.13" Max="7.3.3.99">
 <URL>&pkgURL;/nut-2.8.5-x86_64-1stable.ssl31.txz</URL>
 <MD5>59a93b0f7653d23e4323c2261b1f1429</MD5>
+</FILE>
+
+<!-- Unraid 7.3.4+ default and preview: built by .github/workflows/native-nut.yml from a pinned NUT master commit -->
+<FILE Name="&plgPATH;/&nutNAME;.txz" Min="7.3.4">
+<URL>&pkgURL;/&nutNAME;.txz</URL>
+<MD5>&nutMD5;</MD5>
 </FILE>
 
 <!-- slack15.1 previous -->
@@ -619,14 +630,21 @@ exit 0
 <FILE Min="6.13" Run="/bin/bash">
 <INLINE>
 CONFIG=&plgPATH;/&name;.cfg
+DEFAULTPKG=&plgPATH;/nut-2.8.5-x86_64-1stable.ssl31.txz
+PREVIEWPKG=&plgPATH;/nut-2.8.5-x86_64-1master.ssl31.txz
+# Only downloaded on Unraid 7.3.4 or newer, where it replaces both 2.8.5 builds.
+if [ -f "&plgPATH;/&nutNAME;.txz" ]; then
+    DEFAULTPKG=&plgPATH;/&nutNAME;.txz
+    PREVIEWPKG=&plgPATH;/&nutNAME;.txz
+fi
 if [ -e "$CONFIG" ]; then
     source "$CONFIG"
     if [ "$BACKEND" == "preview" ]; then
         echo "Installing user-configured PREVIEW backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.8.5-x86_64-1master.ssl31.txz
+        upgradepkg --install-new "$PREVIEWPKG"
     elif [ "$BACKEND" == "default" ]; then
         echo "Installing DEFAULT backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.8.5-x86_64-1stable.ssl31.txz
+        upgradepkg --install-new "$DEFAULTPKG"
     elif [ "$BACKEND" == "previous" ]; then
         echo "Installing user-configured PREVIOUS backend for NUT..."
         upgradepkg --install-new &plgPATH;/nut-2.8.4-x86_64-1stable.ssl31.txz
@@ -638,11 +656,11 @@ if [ -e "$CONFIG" ]; then
         upgradepkg --install-new &plgPATH;/nut-2.7.4.20200318-x86_64-1.txz
     else
         echo "Installing DEFAULT backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.8.5-x86_64-1stable.ssl31.txz
+        upgradepkg --install-new "$DEFAULTPKG"
     fi
 else
     echo "Installing DEFAULT backend for NUT..."
-    upgradepkg --install-new &plgPATH;/nut-2.8.5-x86_64-1stable.ssl31.txz
+    upgradepkg --install-new "$DEFAULTPKG"
 fi
 echo ""
 </INLINE>
