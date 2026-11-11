@@ -1,0 +1,15 @@
+[admin]
+password = Adm1n
+actions = set
+actions = fsd
+instcmds = all
+[monuser]
+password = Mon1tor!
+upsmon master
+[remote]
+password = R3mote
+upsmon slave
+instcmds = all
+[homeassistant]
+password = ha
+upsmon slave

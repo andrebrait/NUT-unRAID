@@ -27,6 +27,19 @@ Markdown="false"
 ?>
 <?
 require_once '/usr/local/emhttp/plugins/nut-dw/include/nut_config.php';
+require_once '/usr/local/emhttp/plugins/nut-dw/include/nut_managed.php';
+
+$nut_mc = nut_mc_settings(nut_mc_read_cfg(NUT_MC_DIR . '/nut-dw.cfg'));
+$nut_mc_errors = nut_mc_validate($nut_mc);
+$nut_mc_pending = nut_mc_pending();
+$nut_mc_text = function ($key) use ($nut_mc) { return htmlspecialchars(nut_mc_custom($nut_mc, $key)); };
+$nut_mc_field = function ($key, $title, $help, $example) use ($nut_mc, $nut_mc_text) {
+    return "<dl><dt>Custom $title Directives:</dt><dd>"
+        . "<textarea class='nut-run nut-custom' data-field='$key' rows='3' spellcheck='false' style='width:100%;max-width:640px;font-family:monospace;' placeholder='" . htmlspecialchars($example, ENT_QUOTES) . "'>" . $nut_mc_text($key) . "</textarea>"
+        . "<input type='hidden' class='nut-run' id='$key' name='$key' value='" . htmlspecialchars($nut_mc[$key] ?? '', ENT_QUOTES) . "'>"
+        . "</dd></dl><blockquote class='inline_help'><p>$help</p>"
+        . "<p>These lines are added after the directives generated from the settings above. Directives the settings already generate cannot be overridden here, such conflicts are reported when applying.</p></blockquote>";
+};
 
 $showStatPrefs = version_compare(parse_ini_file('/etc/unraid-version')['version'],'6.12.3', '>');
 $lastStartFailed = false;
@@ -54,6 +67,24 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
 </div><br>
 <?endif;?>
 
+<?if ($nut_mc_pending):?>
+<div class="red-text" style="border: 1px solid red;padding: 5px;">
+    <strong>Your previous NUT configuration was imported into the settings below<?=isset($nut_mc_pending['date']) ? ' on ' . htmlspecialchars($nut_mc_pending['date']) : ''?>.</strong>
+    NUT keeps using the previous configuration files until you review these settings and click <strong>Apply</strong> (stop NUT first to edit them).
+    The previous files are kept in <em>/boot/config/plugins/nut-dw/backup/legacy</em>.
+    <?if (!empty($nut_mc_pending['notes'])):?>
+    <ul><?foreach ($nut_mc_pending['notes'] as $nut_mc_note):?><li><?=htmlspecialchars($nut_mc_note)?></li><?endforeach;?></ul>
+    <?endif;?>
+</div><br>
+<?endif;?>
+
+<?if ($nut_mc_errors):?>
+<div class="red-text" style="border: 1px solid red;padding: 5px;">
+    <strong>These settings cannot be applied<?=$nut_mc_pending ? '' : ' and NUT will not start'?> until the following problems are fixed:</strong>
+    <ul><?foreach ($nut_mc_errors as $nut_mc_error):?><li><?=htmlspecialchars($nut_mc_error)?></li><?endforeach;?></ul>
+</div><br>
+<?endif;?>
+
 <?if ($apc_running):?>
 <div class="red-text" style="border: 1px solid red;padding: 5px;">
     APCUPSD also seems to be enabled, this is not recommended and will lead to both unexpected UPS behaviour and system instabilities.<br>
@@ -72,6 +103,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
 <form markdown="0" id="nut-settings" name="nut_settings" method="POST" action="/update.php" target="progressFrame">
     <input type="hidden" name="#file" value="<?=$sName?>/<?=$sName?>.cfg">
     <input type="hidden" id="command" name="#command" value="/usr/local/emhttp/plugins/nut-dw/scripts/write_config" />
+    <input type="hidden" name="#include" value="plugins/nut-dw/include/nut_validate.php" />
 
     <span style="float:right;margin-right:10px">
     <a href="https://forums.unraid.net/topic/60217-plugin-nut-v2-network-ups-tools/" target="_blank" title="NUT Support Thread"><i class="fa fa-medkit"></i> <u>Support Thread</u></a>
@@ -200,7 +232,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
         <p>NUT - by design - is a rather talkative software package, this is generally extremely valuable for diagnosing any encountered operational problems.</p>
         <p>However, often repeating UPS events such as connection drops or data staleness can fill up the SYSLOG and make diagnosing other unrelated problems more difficult.</p>
         <p>This <strong>in most cases not recommended setting</strong> filters out common repetitive messages from the SYSLOG and redirects them to size-controlled <strong><em><a href="/plugins/nut-dw/include/nut_spamlog_helper.php" target="_blank">/var/log/nut-spam</a></em></strong> instead.</p>
-        <p>Advanced users can extend the predefined rules for commonly encountered repetitive messages by editing <strong><em>/etc/nut/xnut-nospam.conf</em></strong> using the NUT Configuration Editor.</p>
+        <p>Advanced users can extend the predefined rules for commonly encountered repetitive messages by editing <strong><em>/boot/config/plugins/nut-dw/ups/xnut-nospam.conf</em></strong> on the flash drive (applied when NUT is started or its settings are applied).</p>
         <p>Please be aware that previous messages (which have already been logged to the SYSLOG) will not be removed, rather only future encountered messages are affected by this setting.</p>
     </blockquote>
 
@@ -258,27 +290,6 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
         <p>The settings regarding the system log (SYSLOG) itself are handled inside the OS-specific settings: <a href="/Settings/SyslogSettings" target="_blank"><strong><em>Syslog Server</em></strong></a></p>
     </blockquote>
 
-    <dl>
-        <dt>Enable Manual Configuration:</dt>
-        <dd>
-            <select class="nut-run" id="MANUAL" name="MANUAL" size="1">
-                <?=mk_option($nut_manual, "disable", "No");?>
-                <?=mk_option($nut_manual, "enable", "Yes");?>
-                <?=mk_option($nut_manual, "onlyups", "for UPS Driver");?>
-            </select>
-        </dd>
-    </dl>
-
-    <blockquote class="inline_help">
-        <p>Set to <strong><em>Yes</em></strong> to enable manual configuration of NUT, set to <strong><em>No</em></strong> to disable manual configuration of NUT.</p>
-        <p>Setting <strong><em>Yes</em></strong> will ignore and hide all NUT settings on this page. The NUT configuration files will be used instead.</p>
-        <p>Setting <strong><em>No</em></strong> will use the NUT settings on this page to configure the NUT services and populate the configuration files.</p>
-        <p>Setting <strong><em>for UPS Driver</em></strong> (usually set by the <strong><em>AUTO CONFIG</em></strong> feature) enables manual configuration of NUT only for the <strong><em>ups.conf</em></strong> file.</p>
-        <p>Regardless of this setting, you can always edit the configuration files to add any extra settings not included on this page.</p>
-        <p>If not in manual configuration mode, beware the GUI reserved lines marked in the configuration files so your extra settings are not overwritten.</p>
-        <p><u>Note:</u> If you run into problems after changing this setting, it might be helpful to start from a fresh configuration using the <strong><em>RESET CONFIG</em></strong> feature.</p>
-    </blockquote>
-
     <div id="MODEIPSETT">
         <dl>
             <dt>NUT Mode:</dt>
@@ -293,10 +304,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
 
         <blockquote class="inline_help">
             <p>This setting defines the mode your NUT services will operate in and also the level of connectivity they will provide:</p>
-            <p><strong><em>Standalone</em></strong> - Your UPS is connected to your UNRAID server and no external (slave) connections to NUT will be possible.</p>
+            <p><strong><em>Standalone</em></strong> - Your UPS is connected to your UNRAID server and no external (slave) connections to NUT will be possible (NUT only listens on 127.0.0.1).</p>
             <p><strong><em>Netserver</em></strong> - Your UPS is connected to your UNRAID server and external (slave) connections to NUT will be possible.</p>
             <p><strong><em>Slave</em></strong> - Your UPS is connected to another NUT master server and you want your UNRAID server to connect to it as a NUT slave.</p>
-            <p>In <strong><em>manual configuration</em></strong> mode, this setting controls which services of the NUT ecosystem are started alongside your configuration.</p>
         </blockquote>
 
         <?if ($nut_running && $nut_mode == "netserver"):?>
@@ -327,7 +337,6 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
         <blockquote class="inline_help">
             <p>The IP address of the NUT master server (the UPS is connected to) to monitor.</p>
             <p>In <strong><em>Standalone</em></strong> and <strong><em>Netserver</em></strong> modes, this setting should be <strong><em>127.0.0.1</em></strong></p>
-            <p>In <strong><em>manual configuration</em></strong> mode, this setting controls which NUT master server the GUI dashboards will show information for.</p>
         </blockquote>
     </div>
     <div id="SETTINGS1">
@@ -347,13 +356,13 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
             <dt>NUT Monitor Password:</dt>
             <dd>
                 <input id="MONPASS" type="password" class="narrow nut-run" name="MONPASS" value="<?=$nut_monpass?>">
-                <i id="monpass-htext" class="fa fa-hand-paper-o tooltip-nutsett" title="If possible use only letters and numbers!" style="display:none;color:red;cursor:help;"></i>
+                <i id="monpass-htext" class="fa fa-hand-paper-o tooltip-nutsett" title="Spaces and the characters # &quot; \ = are not allowed!" style="display:none;color:red;cursor:help;"></i>
             </dd>
         </dl>
 
         <blockquote class="inline_help">
             <p>The password to access the NUT master server.</p>
-            <p>It is recommended to use <strong>only letters and numbers</strong> for the password (no spaces or special symbols).</p>
+            <p>Use printable characters without spaces or <strong># " \ =</strong> - NUT sends passwords unquoted over the network.</p>
         </blockquote>
 
         <dl>
@@ -389,23 +398,60 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
             <blockquote class="inline_help">
                 <p>The username for NUT slaves to use connecting to the NUT master server.</p>
                 <p><u>Warning:</u> Do not set this to the same username as <strong><em>NUT Monitor Username</em></strong>.</p>
-                <p><u>Note:</u> NUT is configured to listen on all interfaces (<strong><em>0.0.0.0</em></strong>).</p>
+                <p><u>Note:</u> NUT listens on the addresses set in <strong><em>NUT Listen Addresses</em></strong> below.</p>
             </blockquote>
 
             <dl>
                 <dt>NUT Slave Password:</dt>
                 <dd>
                     <input id="SLAVEPASS" type="password" class="narrow nut-run" name="SLAVEPASS" value="<?=$nut_slavepass?>">
-                    <i id="slavepass-htext" class="fa fa-hand-paper-o tooltip-nutsett" title="If possible use only letters and numbers!" style="display:none;color:red;cursor:help;"></i>
+                    <i id="slavepass-htext" class="fa fa-hand-paper-o tooltip-nutsett" title="Spaces and the characters # &quot; \ = are not allowed!" style="display:none;color:red;cursor:help;"></i>
                 </dd>
             </dl>
 
             <blockquote class="inline_help">
                 <p>The password for NUT slaves to use connecting to the NUT master server.</p>
-                <p>It is recommended to use <strong>only letters and numbers</strong> for the password (no spaces or special symbols).</p>
-                <p><u>Note:</u> NUT is configured to listen on all interfaces (<strong><em>0.0.0.0</em></strong>).</p>
+                <p>Use printable characters without spaces or <strong># " \ =</strong> - NUT sends passwords unquoted over the network.</p>
+            </blockquote>
+
+            <dl>
+                <dt>NUT Listen Addresses:</dt>
+                <dd>
+                    <input id="LISTEN" type="text" class="narrow nut-run" name="LISTEN" value="<?=$nut_listen?>">
+                </dd>
+            </dl>
+
+            <blockquote class="inline_help">
+                <p>The addresses NUT listens on for slave connections in <strong><em>Netserver</em></strong> mode, separated by spaces (port 3493).</p>
+                <p><strong><em>0.0.0.0</em></strong> listens on all IPv4 interfaces. When listing specific addresses, include <strong><em>127.0.0.1</em></strong> for the local NUT monitor.</p>
+                <p>In <strong><em>Standalone</em></strong> mode NUT only listens on <strong><em>127.0.0.1</em></strong>.</p>
             </blockquote>
         </div>
+
+        <dl>
+            <dt>NUT Admin Username:</dt>
+            <dd>
+                <input id="ADMINUSER" type="text" class="narrow nut-run nut-alphanumeric" name="ADMINUSER" value="<?=$nut_adminuser?>" placeholder="none">
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>Optional administrative user for the <strong><em>NUT Commands</em></strong> page, leave empty (with an empty password) to have no such user.</p>
+            <p>In <strong><em>Standalone</em></strong> and <strong><em>Netserver</em></strong> modes this user is created with permission to set variables, force shutdowns and run all UPS commands.</p>
+            <p>In <strong><em>Slave</em></strong> mode, enter an administrative user that exists on the NUT master server instead.</p>
+        </blockquote>
+
+        <dl>
+            <dt>NUT Admin Password:</dt>
+            <dd>
+                <input id="ADMINPASS" type="password" class="narrow nut-run" name="ADMINPASS" value="<?=$nut_adminpass?>">
+                <i id="adminpass-htext" class="fa fa-hand-paper-o tooltip-nutsett" title="Spaces and the characters # &quot; \ = are not allowed!" style="display:none;color:red;cursor:help;"></i>
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>The password of the NUT Admin user. Use printable characters without spaces or <strong># " \ =</strong>.</p>
+        </blockquote>
     </div>
 
     <div id="NAMESETT">
@@ -419,7 +465,6 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
         <blockquote class="inline_help">
             <p>The name of the UPS configured in NUT (on the master server).</p>
             <p>It is recommended to leave this setting as it is, unless connecting to a UPS with a different name in <strong><em>Slave</em></strong> mode.</p>
-            <p>In <strong><em>manual configuration</em></strong> mode, this setting controls which of your (possibly multiple) configured UPS the GUI dashboards will show information for.</p>
         </blockquote>
     </div>
 
@@ -504,7 +549,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
 
                 <blockquote class="inline_help">
                     <p>The SNMP version to use to communicate with your UPS SNMP agent.</p>
-                    <p>Please note that <strong><em>v3</em></strong> requires for <a href="https://networkupstools.org/docs/man/snmp-ups.html" target="_blank">additional authentication settings</a> to be put into the <strong><em>UPS.CONF</em></strong> configuration file (using the GUI configuration editor).</p>
+                    <p>Please note that <strong><em>v3</em></strong> requires <a href="https://networkupstools.org/docs/man/snmp-ups.html" target="_blank">additional authentication settings</a> in the <strong><em>Custom ups.conf (UPS section) Directives</em></strong> below.</p>
                 </blockquote>
 
                 <dl>
@@ -574,6 +619,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
                     <p>The desired SNMP polling frequency (in seconds).</p>
                 </blockquote>
             </div>
+
+            <?=$nut_mc_field('CUSTOM_UPSGLOBAL', 'ups.conf (global)', 'Global <strong><em>ups.conf</em></strong> directives, placed before the UPS section (e.g. <em>maxretry</em> or <em>pollinterval</em>).', 'maxretry = 3')?>
+            <?=$nut_mc_field('CUSTOM_UPS', 'ups.conf (UPS section)', 'Extra UPS driver options for the UPS section of <strong><em>ups.conf</em></strong> (e.g. <em>vendorid</em>, <em>serial</em> or SNMPv3 credentials), as found by <strong><em>Auto Config</em></strong> or the device scanner.', 'vendorid = 051d')?>
         </div>
 
         <dl>
@@ -696,6 +744,14 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
             <p>Set to <strong><em>Yes</em></strong> to receive a notification when the UPS reports the batteries as needing replacement.</p>
             <p>By default this notification will be sent every 12 hours until the batteries are replaced.</p>
         </blockquote>
+
+        <?=$nut_mc_field('CUSTOM_NUT', 'nut.conf', 'Extra <strong><em>nut.conf</em></strong> settings in shell syntax.', 'ALLOW_NO_DEVICE=true')?>
+        <div id="CUSTOMSERVER">
+            <?=$nut_mc_field('CUSTOM_UPSD', 'upsd.conf', 'Extra <strong><em>upsd.conf</em></strong> directives (e.g. <em>MAXAGE</em>).', 'MAXAGE 25')?>
+            <?=$nut_mc_field('CUSTOM_USERS', 'upsd.users', 'Additional <strong><em>upsd.users</em></strong> users, each starting with a <em>[username]</em> line (e.g. for other NUT clients).', '[homeassistant]')?>
+        </div>
+        <?=$nut_mc_field('CUSTOM_UPSMON', 'upsmon.conf', 'Extra <strong><em>upsmon.conf</em></strong> directives (e.g. <em>NOTIFYFLAG LOWBATT SYSLOG+EXEC</em>). Notification hook functions are kept in <strong><em>/boot/config/plugins/nut-dw/ups/xnut-notify-hooks.sh</em></strong> on the flash drive.', 'NOTIFYFLAG LOWBATT SYSLOG+EXEC')?>
+        <?=$nut_mc_field('CUSTOM_UPSSCHED', 'upssched.conf', 'Contents of <strong><em>upssched.conf</em></strong>, the plugin generates no upssched directives itself.', 'CMDSCRIPT /etc/nut/upssched-cmd')?>
     </div>
 
     <br>
@@ -1068,104 +1124,23 @@ if (file_exists('/usr/local/emhttp/plugins/nut-dw/misc/start-failed')) {
 
 <script type="text/javascript">
 function checkNUTsettings() {
-    $('#SETTINGS1').hide();
-    $('#SETTINGS2').hide();
-    $('#DRIVERS').hide();
-    $('#SLAVE').hide();
-    $('#UPSKILL').hide();
-    $('#SERIAL').prop('type', 'hidden');
-    $('#snmp').hide();
-    $('#SHUTDOWN0').hide();
-    $('#SHUTDOWN1').hide();
-    $('#SHUTDOWN2').hide();
-    $('#NAMESETT').hide();
-    $('#MODEIPSETT').hide();
-
-    if ($('#MANUAL').val() === 'enable') {
-        $('#SETTINGS1').hide();
-        $('#SETTINGS2').hide();
-        $('#NAMESETT').show();
-        $('#MODEIPSETT').show();
-        $('#IPADDR').attr('readonly', false);
-    } else if ($('#MANUAL').val() === 'onlyups') {
-        $('#SETTINGS1').show();
-        $('#SETTINGS2').show();
-        $('#NAMESETT').show();
-        $('#MODEIPSETT').show();
-
-        var Shutdown = $('#SHUTDOWN')[0].selectedIndex;
-        for (var i = 0; i < 3; i++) {
-            if (i == Shutdown) {
-                $('#SHUTDOWN'+i).show();
-            } else {
-                $('#SHUTDOWN'+i).hide();
-            }
-        }
-
-        if ($('#MODE')[0].selectedIndex < 2){
-            //standalone+netserver
-            $('#IPADDR').val('127.0.0.1');
-            $('#IPADDR').attr('readonly', true);
-            $('#UPSKILL').show();
-        }else{
-            //slave
-            $('#IPADDR').attr('readonly', false);
-            $('#UPSKILL').hide();
-        }
-        if ($('#MODE')[0].selectedIndex != 1) {
-            //standalone+slave
-            $('#SLAVE').hide();
-        } else {
-            //netserver
-            $('#SLAVE').show();
-        }
-    } else {
-        $('#SETTINGS1').show();
-        $('#SETTINGS2').show();
-        $('#NAMESETT').show();
-        $('#MODEIPSETT').show();
-
-        var Shutdown = $('#SHUTDOWN')[0].selectedIndex;
-        for (var i = 0; i < 3; i++) {
-            if (i == Shutdown) {
-                $('#SHUTDOWN'+i).show();
-            } else {
-                $('#SHUTDOWN'+i).hide();
-            }
-        }
-
-        if ($('#MODE')[0].selectedIndex < 2){
-            //standalone+netserver
-            $('#IPADDR').val('127.0.0.1');
-            $('#IPADDR').attr('readonly', true);
-            $('#UPSKILL').show();
-
-            $('#DRIVERS').show();
-
-            if ($('#DRIVER').val() == 'custom' ) {
-                $('#SERIAL').prop('type', 'text');
-            } else {
-                $('#SERIAL').prop('type', 'hidden');
-            }
-
-            if ($('#DRIVER').val() == 'snmp-ups' ) {
-                $('#snmp').show();
-            } else {
-                $('#snmp').hide();
-            }
-        }else{
-            //slave
-            $('#IPADDR').attr('readonly', false);
-            $('#UPSKILL').hide();
-        }
-        if ($('#MODE')[0].selectedIndex != 1) {
-            //standalone+slave
-            $('#SLAVE').hide();
-        } else {
-            //netserver
-            $('#SLAVE').show();
-        }
+    var mode = $('#MODE').val();
+    var Shutdown = $('#SHUTDOWN')[0].selectedIndex;
+    for (var i = 0; i < 3; i++) {
+        $('#SHUTDOWN'+i).toggle(i == Shutdown);
     }
+
+    $('#SLAVE').toggle(mode === 'netserver');
+    $('#DRIVERS').toggle(mode !== 'slave');
+    $('#CUSTOMSERVER').toggle(mode !== 'slave');
+    $('#UPSKILL').toggle(mode !== 'slave');
+    $('#SERIAL').prop('type', $('#DRIVER').val() == 'custom' ? 'text' : 'hidden');
+    $('#snmp').toggle($('#DRIVER').val() == 'snmp-ups');
+
+    if (mode !== 'slave') {
+        $('#IPADDR').val('127.0.0.1');
+    }
+    $('#IPADDR').attr('readonly', mode !== 'slave');
 }
 
 function checkNUTSTATsettings(toggleChanged = true) {
@@ -1211,17 +1186,46 @@ function checkPOWER() {
         $('#POWER-SETTINGS').show();
 }
 
-function decData() {
-    $('#MONPASS').val(atob($('#MONPASS').val()));
-    $('#SLAVEPASS').val(atob($('#SLAVEPASS').val()));
+// passwords and custom directives are stored base64-encoded in the settings file
+function nutB64(text) {
+    return btoa(unescape(encodeURIComponent(text)));
+}
 
-    var format = /[ `!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~]/;
-    if(format.test($('#MONPASS').val())) {
-        $('#monpass-htext').show();
-    }
-    if(format.test($('#SLAVEPASS').val())) {
-        $('#slavepass-htext').show();
-    }
+function nutUnB64(text) {
+    try { return decodeURIComponent(escape(atob(text))); } catch (e) { return ''; }
+}
+
+function decData() {
+    ['MONPASS', 'SLAVEPASS', 'ADMINPASS'].forEach(function (id) {
+        $('#' + id).val(nutUnB64($('#' + id).val()));
+        $('#' + id.toLowerCase() + '-htext').toggle(/[\s#"\\=]/.test($('#' + id).val()));
+    });
+}
+
+function encData() {
+    ['MONPASS', 'SLAVEPASS', 'ADMINPASS'].forEach(function (id) {
+        $('#' + id).val(nutB64($('#' + id).val()));
+    });
+    $('.nut-custom').each(function () {
+        $('#' + $(this).data('field')).val(nutB64($(this).val()));
+    });
+}
+
+function applySettings(e) {
+    e.preventDefault();
+    encData();
+    $.post('/plugins/nut-dw/include/nut_validate.php', $('#nut-settings').serialize(), function (data) {
+        if (data && data.errors && data.errors.length) {
+            decData();
+            swal({title: 'Settings not applied', type: 'error', html: true,
+                  text: '<div style="text-align:left">' + data.errors.map(function (error) { return '- ' + $('<div>').text(error).html(); }).join('<br>') + '</div>'});
+        } else {
+            $('#nut-settings').submit();
+        }
+    }, 'json').fail(function () {
+        decData();
+        swal('Settings not applied', 'The settings could not be validated, please try again.', 'error');
+    });
 }
 
 function RotateNUTLog() {
@@ -1306,11 +1310,11 @@ function getNUTclients() {
 $(function() {
     showStatus('upsmon');
 
-    $('.nut-name').mask('ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ', {translation:  {'Z': {pattern: /[A-Za-z0-9-]/, optional: true}}});
+    $('.nut-name').mask('ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ', {translation:  {'Z': {pattern: /[A-Za-z0-9_.-]/, optional: true}}});
     $('.nut-ipaddr').mask('0ZZ.0ZZ.0ZZ.0ZZZZZZZZ', {translation:  {'Z': {pattern: /[0-9:]/, optional: true}}});
 
     $('.nut-numeric').mask('ZZZZZZZZZZZZZZZ', {translation:  {'Z': {pattern: /[0-9-]/, optional: true}}});
-    $('.nut-alphanumeric').mask('ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ', {translation:  {'Z': {pattern: /[A-Za-z0-9]/, optional: true}}});
+    $('.nut-alphanumeric').mask('ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ', {translation:  {'Z': {pattern: /[A-Za-z0-9_.-]/, optional: true}}});
 
     if (typeof swal === "function") {
         $('#SCAN').click(function(){ swal({title:"Warning",text:"Please always attempt to (manually) set up your respective UPS Driver with the UPS Port on 'auto' first, this is more flexible and preferable to running the 'Auto Config' program straight after installation.<br><br>This tool is for cases where the UPS driver fails to otherwise find your UPS device, even with the correct UPS Driver and UPS Port on 'auto'.<br><br>Beware that 'Auto Config' will make your UPS Driver blind to anything else than that specific UPS device it detected on that specific USB port (that means you cannot change the USB port afterwards).<br><br>In case 'Auto Config' detects a UPS but still does not work for you, please make sure to always 'Reset Config' to start with a fresh configuration before attemping anything else configuration-wise.",type:"warning",html:true,showCancelButton:true}, ScanUPS); });
@@ -1334,14 +1338,9 @@ $(function() {
         }
     });
 
-    $('#btnApply').click(function(){
-        $('#MONPASS').val(btoa($('#MONPASS').val()));
-        $('#SLAVEPASS').val(btoa($('#SLAVEPASS').val()));
-        $('#nut-settings').submit();
-    });
+    $('#btnApply').click(applySettings);
 
     $('#DRIVER').change(checkNUTsettings);
-    $('#MANUAL').change(checkNUTsettings);
     $('#SHUTDOWN').change(checkNUTsettings);
     $('#MODE').change(checkNUTsettings);
     $('#SERVICE').change(checkRUNNING);

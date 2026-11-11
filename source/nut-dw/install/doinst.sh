@@ -59,11 +59,15 @@ if [ ! -d $BOOT/ups ]; then
     mkdir $BOOT/ups
 fi
 
-# copy default conf files to flash drive, if no backups exist there
-cp -nr $DOCROOT/nut-defaults/* $BOOT/ups/ >/dev/null 2>&1
+# copy the default user files (notification hooks, syslog filters) to flash drive, if missing there
+cp -n $DOCROOT/nut-defaults/* $BOOT/ups/ >/dev/null 2>&1
+
+# generate the NUT configuration files on the flash drive from the settings
+# (a previous hand-edited configuration is imported and kept in use until the user applies it)
+/usr/bin/php $DOCROOT/scripts/managed_config write
 
 # copy conf files from flash drive to local system, for our services to use
-cp -rf $BOOT/ups/* /etc/nut/ >/dev/null 2>&1
+(umask 027; cp -rf $BOOT/ups/* /etc/nut/ >/dev/null 2>&1)
 
 # remove (legacy) plugin-specific polling tasks
 rm -f /etc/cron.daily/nut-poller >/dev/null 2>&1

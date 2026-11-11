@@ -29,6 +29,7 @@ rm -f $BOOT/nut-dw.cfg
 rm -rf /etc/nut
 rm -rf $BOOT/ups
 rm -f /boot/config/plugins/nut-dw/migration-*
+rm -f $BOOT/import-report.json
 
 echo "Recreating configuration folders..."
 if [ ! -d /etc/nut ]; then

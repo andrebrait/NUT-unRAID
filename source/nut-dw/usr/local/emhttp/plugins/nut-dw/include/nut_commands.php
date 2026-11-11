@@ -18,14 +18,21 @@
  *
  */
 require_once '/usr/local/emhttp/plugins/nut-dw/include/nut_config.php';
+require_once '/usr/local/emhttp/plugins/nut-dw/include/nut_managed.php';
 $resp = [];
 
 try {
-    if(isset($_POST["nutcmdname"]) && isset($_POST["nutcmduser"]) && isset($_POST["nutcmdpass"]))
+    // commands run as the admin user configured in the NUT settings, the browser never sees its password
+    $nutcmd_userval = $nut_cfg['ADMINUSER'] ?? '';
+    $nutcmd_passval = nut_mc_decode($nut_cfg['ADMINPASS'] ?? '') ?? '';
+    if($nutcmd_userval === '' || $nutcmd_passval === '') {
+        $resp["error"]["response"] = "No NUT Admin credentials are configured in the NUT Settings.";
+    }
+    elseif(isset($_POST["nutcmdname"]))
     {
         $nutcmd = escapeshellarg($_POST["nutcmdname"]);
-        $nutcmd_user = escapeshellarg($_POST["nutcmduser"]);
-        $nutcmd_pass = escapeshellarg($_POST["nutcmdpass"]);
+        $nutcmd_user = escapeshellarg($nutcmd_userval);
+        $nutcmd_pass = escapeshellarg($nutcmd_passval);
         $nutcmd_ups = escapeshellarg($nut_name);
         $nutcmd_ip = escapeshellarg($nut_ip);
         $nutcmd_arg = (isset($_POST["nutcmdarg"]) && !empty($_POST["nutcmdarg"])) ? escapeshellarg($_POST["nutcmdarg"]) : false;

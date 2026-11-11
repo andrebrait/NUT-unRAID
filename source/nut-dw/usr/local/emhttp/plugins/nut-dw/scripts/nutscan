@@ -60,7 +60,6 @@ if [ -z "$SCANRESULT" ]; then
     SCANFAILED="yes"
 else
     echo "${SCANRESULT}"
-    echo "${SCANRESULT}" > /etc/nut/ups.conf
 fi
 
 echo ""
@@ -68,22 +67,15 @@ echo "#####################################################"
 echo ""
 
 if [ "$SCANFAILED" == "no" ]; then
-    echo "Adjusting the NUT configuration for the found UPS..."
-    sed -i "1 s/^.*$/\[${NAME}\]/" /etc/nut/ups.conf 2>&1
-
-    if [ "$MANUAL" == "disable" ]; then
-        echo "Setting the manual configuration mode ('for UPS Driver') in GUI..."
-        sed -i '/MANUAL=/c\MANUAL="onlyups"' $CONFIG 2>&1
+    echo "Writing the found UPS into the NUT settings..."
+    if ! /usr/bin/php /usr/local/emhttp/plugins/nut-dw/scripts/managed_config scan <<< "$SCANRESULT"; then
+        SCANFAILED="yes"
     fi
+fi
 
-    echo "Writing the modified NUT configuration to the respective locations..."
-    if [ -x /etc/rc.d/rc.nut ]; then
-        /etc/rc.d/rc.nut write_config 1>/dev/null
-    fi
-
+if [ "$SCANFAILED" == "no" ]; then
     echo ""
-    echo "NUT Scanner has finished configuring NUT - please attempt to start your NUT services now."
-    echo "If multiple UPS were detected, remove any unneeded UPS sections from UPS.CONF using the GUI configuration editor first."
+    echo "NUT Scanner has finished configuring NUT - review the NUT Settings, then apply them to start your NUT services."
 else
     echo "NUT Scanner has finished without configuring NUT - no settings were changed."
     echo ""

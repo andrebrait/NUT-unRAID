@@ -168,126 +168,43 @@ backup_logs() {
     fi
 }
 
+# insert $2 into rc.6 after the last line matching $1, then verify it is really there
+add_rc6_hook() {
+    grep -qF "$2" /etc/rc.d/rc.6 && return 0
+    echo "Adding '$2' to rc.6 for NUT..."
+    awk -v anchor="$1" -v hook="$2" '
+    $0 ~ anchor { last=NR }
+    { lines[NR]=$0 }
+    END {
+        for (i=1; i<=NR; i++) {
+            print lines[i]
+            if (i==last) print hook
+        }
+    }' /etc/rc.d/rc.6 > /etc/rc.d/rc.6.new && cat /etc/rc.d/rc.6.new > /etc/rc.d/rc.6
+    rm -f /etc/rc.d/rc.6.new
+    if ! grep -qF "$2" /etc/rc.d/rc.6; then
+        echo "ERROR: NUT could not add '$2' to /etc/rc.d/rc.6 (no line matching '$1' found)."
+        echo "ERROR: Powering off the UPS after a NUT-initiated shutdown will NOT work on this Unraid version."
+        logger -p daemon.err -t "rc.nut" "ERROR: could not add '$2' to /etc/rc.d/rc.6 (anchor '$1' not found), UPS power-off after shutdown will not work"
+        return 1
+    fi
+}
+
 write_config() {
     echo "Writing NUT configuration..."
+    local RETVAL=0
 
-    if [ "$MANUAL" == "disable" ] || [ "$MANUAL" == "onlyups" ]; then
-        if [ "$MANUAL" == "disable" ]; then
-            # add the name
-            sed -i "1 s~.*~[${NAME}]~" /etc/nut/ups.conf
-
-            # Add the driver config
-            if [ "$DRIVER" == "custom" ]; then
-                    sed -i "2 s/.*/driver = ${SERIAL}/" /etc/nut/ups.conf
-            else
-                    sed -i "2 s/.*/driver = ${DRIVER}/" /etc/nut/ups.conf
-            fi
-
-            # add the port
-            if [ -n "$PORT" ]; then
-                sed -i "3 s~.*~port = ${PORT}~" /etc/nut/ups.conf
-            else
-                sed -i "3 s~.*~port = auto~" /etc/nut/ups.conf
-            fi
-
-            # Add SNMP-specific config
-            if [ "$DRIVER" == "snmp-ups" ]; then
-                [ -z "$SNMPVER" ] && SNMPVER="v2c"
-                [ -z "$SNMPMIB" ] && SNMPMIB="auto"
-
-                var10="pollfreq = ${POLL}"
-                var11="community = ${COMMUNITY}"
-                var12="snmp_version = ${SNMPVER}"
-
-                if [ "$SNMPMIB" == "auto" ]; then
-                    var13=''
-                else
-                    var13="mibs = \"${SNMPMIB}\""
-                fi
-            else
-                var10=''
-                var11=''
-                var12=''
-                var13=''
-            fi
-
-            # UPS Driver Debug Level
-            if [ "$DEBLEVEL" == "default" ]; then
-                var14=''
-            elif [ -n "$DEBLEVEL" ]; then
-                var14="debug_min = ${DEBLEVEL}"
-            else
-                var14=''
-            fi
-
-            sed -i "4 s/.*/$var10/" /etc/nut/ups.conf
-            sed -i "5 s/.*/$var11/" /etc/nut/ups.conf
-            sed -i "6 s/.*/$var12/" /etc/nut/ups.conf
-            sed -i "7 s/.*/$var13/" /etc/nut/ups.conf
-            sed -i "8 s/.*/$var14/" /etc/nut/ups.conf
-        fi
-
-        # add mode standalone/netserver
-        sed -i "1 s/.*/MODE = ${MODE}/" /etc/nut/nut.conf
-
-        # Set monitor ip address, user, password and mode
-        if [ "$MODE" == "slave" ]; then
-            MONITOR="slave"
-        else
-            MONITOR="master"
-        fi
-
-        # decode monitor passwords
-        MONPASS="$(echo "$MONPASS" | base64 --decode)"
-        SLAVEPASS="$(echo "$SLAVEPASS" | base64 --decode)"
-
-        var1="MONITOR ${NAME}@${IPADDR} 1 ${MONUSER} ${MONPASS} ${MONITOR}"
-        sed -i "1 s,.*,$var1," /etc/nut/upsmon.conf
-
-        # Set if the ups should be turned off
-        if [ "$UPSKILL" == "enable" ]; then
-            var8='POWERDOWNFLAG "/etc/nut/killpower"'
-            sed -i "3 s,.*,$var8," /etc/nut/upsmon.conf
-        else
-            var9='POWERDOWNFLAG "/etc/nut/no_killpower"'
-            sed -i "3 s,.*,$var9," /etc/nut/upsmon.conf
-        fi
-
-        # NUT Monitor Debug Level
-        if [ "$DEBLEVELMON" == "default" ]; then
-            var24=''
-        elif [ -n "$DEBLEVELMON" ]; then
-            var24="DEBUG_MIN ${DEBLEVELMON}"
-        else
-            var24=''
-        fi
-
-        sed -i "8 s/.*/$var24/" /etc/nut/upsmon.conf
-
-        if [ "$MODE" != "slave" ]; then
-            # Set upsd users
-            var18="[${MONUSER}]"
-            var19="password = ${MONPASS}"
-            var21="[${SLAVEUSER}]"
-            var22="password = ${SLAVEPASS}"
-            sed -i "6 s,.*,$var18," /etc/nut/upsd.users
-            sed -i "7 s,.*,$var19," /etc/nut/upsd.users
-            sed -i "8 s,.*,upsmon master," /etc/nut/upsd.users
-            sed -i "9 s,.*,$var21," /etc/nut/upsd.users
-            sed -i "10 s,.*,$var22," /etc/nut/upsd.users
-            sed -i "11 s,.*,upsmon slave," /etc/nut/upsd.users
-        fi
+    # generate the NUT configuration files from the settings onto the flash drive
+    # (or keep using a previous configuration whose imported settings await review)
+    if ! /usr/bin/php $DOCROOT/scripts/managed_config write; then
+        echo "ERROR: The NUT settings are invalid, so the NUT configuration was not updated and NUT will not start."
+        echo "ERROR: Correct the problems shown on the NUT Settings page."
+        RETVAL=1
     fi
 
-    # save conf files to flash drive regardless of mode
-    # also here in case someone directly modified files in /etc/nut
-    # flash directory will be created if missing (shouldn't happen)
-
-    if [ ! -d $PLGPATH/ups ]; then
-        mkdir $PLGPATH/ups
-    fi
-
-    cp -rf /etc/nut/* $PLGPATH/ups/ >/dev/null 2>&1
+    # the flash drive holds the generated files and any user files (e.g. xnut-notify-hooks.sh)
+    mkdir -p /etc/nut
+    (umask 027; cp -rf $PLGPATH/ups/* /etc/nut/ >/dev/null 2>&1)
 
     # re-create state directories if missing
     [ ! -d /var/state/ups ] && mkdir -p /var/state/ups
@@ -308,31 +225,8 @@ write_config() {
     fi
 
     # Link shutdown scripts for poweroff in rc.6
-    if [ "$( grep -ic "/etc/rc.d/rc.nut restart_udev" /etc/rc.d/rc.6 )" -eq 0 ]; then
-        echo "Adding UDEV lines to rc.6 for NUT..."
-        awk '
-        /remount,ro/ { last=NR }
-        { lines[NR]=$0 }
-        END {
-            for (i=1; i<=NR; i++) {
-                print lines[i]
-                if (i==last) print "[ -x /etc/rc.d/rc.nut ] && /etc/rc.d/rc.nut restart_udev"
-            }
-        }' /etc/rc.d/rc.6 > /etc/rc.d/rc.6.new && cat /etc/rc.d/rc.6.new > /etc/rc.d/rc.6 && rm -f /etc/rc.d/rc.6.new
-    fi
-
-    if [ "$( grep -ic "/etc/rc.d/rc.nut shutdown" /etc/rc.d/rc.6 )" -eq 0 ]; then
-        echo "Adding UPS shutdown lines to rc.6 for NUT..."
-        awk '
-        /# Now halt/ { last=NR }
-        { lines[NR]=$0 }
-        END {
-            for (i=1; i<=NR; i++) {
-                print lines[i]
-                if (i==last) print "[ -x /etc/rc.d/rc.nut ] && /etc/rc.d/rc.nut shutdown"
-            }
-        }' /etc/rc.d/rc.6 > /etc/rc.d/rc.6.new && cat /etc/rc.d/rc.6.new > /etc/rc.d/rc.6 && rm -f /etc/rc.d/rc.6.new
-    fi
+    add_rc6_hook 'remount,ro' '[ -x /etc/rc.d/rc.nut ] && /etc/rc.d/rc.nut restart_udev'
+    add_rc6_hook '# Now halt' '[ -x /etc/rc.d/rc.nut ] && /etc/rc.d/rc.nut shutdown'
 
     RESTARTSYSLOG="NO"
 
@@ -473,6 +367,8 @@ write_config() {
 
     # NUT Runtime Statistics Module
     /etc/rc.d/rc.nutstats check
+
+    return $RETVAL
 }
 
 case "$1" in
@@ -484,13 +380,13 @@ case "$1" in
         ;;
     start)  # starts everything (for a ups server box)
         sleep 1
-        write_config
+        write_config || error_at_start
         sleep 1
         start
         ;;
     start_upsmon) # starts upsmon only (for a ups client box)
         sleep 1
-        write_config
+        write_config || error_at_start
         sleep 1
         start_upsmon
         ;;
@@ -504,7 +400,7 @@ case "$1" in
         ;;
     reload)
         sleep 1
-        write_config
+        write_config || exit 1
         sleep 1
         if [ "$MODE" != "slave" ]; then
             start_driver
@@ -515,7 +411,8 @@ case "$1" in
         ;;
     restart)
         sleep 1
-        write_config
+        # keep the running services if the new configuration is invalid
+        write_config || error_at_start
         sleep 1
         stop
         sleep 3

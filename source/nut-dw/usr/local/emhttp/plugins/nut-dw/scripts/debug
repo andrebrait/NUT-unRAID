@@ -66,6 +66,8 @@ SLAVEPASSDEC="$(echo "$SLAVEPASS" | base64 --decode)"
 [ -f $DEBUGROOT/PLUGIN/nut-dw.cfg.txt ] && sed -i '/MONPASS=/c\MONPASS="PASS-REMOVED"' $DEBUGROOT/PLUGIN/nut-dw.cfg.txt 2>&1
 [ -f $DEBUGROOT/PLUGIN/nut-dw.cfg.txt ] && sed -i '/SLAVEPASS=/c\SLAVEPASS="PASS-REMOVED"' $DEBUGROOT/PLUGIN/nut-dw.cfg.txt 2>&1
 [ -f $DEBUGROOT/PLUGIN/nut-dw.cfg.txt ] && sed -i '/COMMUNITY=/c\COMMUNITY="COMMUNITY-REMOVED"' $DEBUGROOT/PLUGIN/nut-dw.cfg.txt 2>&1
+[ -f $DEBUGROOT/PLUGIN/nut-dw.cfg.txt ] && sed -i -e '/^ADMINUSER=/c\ADMINUSER="USER-REMOVED"' -e '/^ADMINPASS=/c\ADMINPASS="PASS-REMOVED"' -e 's/^\(CUSTOM_[A-Z]*\)=.*/\1="REMOVED (see the configuration files)"/' $DEBUGROOT/PLUGIN/nut-dw.cfg.txt 2>&1
+[ -n "$ADMINUSER" ] && sed -i "s/${ADMINUSER}/USER-REMOVED/g" $DEBUGROOT/RAM/upsd.users.txt $DEBUGROOT/USB/upsd.users.txt 2>&1
 
 [ -f $DEBUGROOT/RAM/ups.conf.txt ] && sed -i '/community/c\community = COMMUNITY-REMOVED' $DEBUGROOT/RAM/ups.conf.txt 2>&1
 [ -f $DEBUGROOT/USB/ups.conf.txt ] && sed -i '/community/c\community = COMMUNITY-REMOVED' $DEBUGROOT/USB/ups.conf.txt 2>&1
