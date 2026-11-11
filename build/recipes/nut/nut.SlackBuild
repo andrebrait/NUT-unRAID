@@ -4,6 +4,7 @@
 # Configure flags, install layout and slack-desc text follow desertwitch's
 # nut-2.8.5-x86_64-1stable.ssl31.txz (flags as reported by its `upsd -V`):
 # https://github.com/desertwitch/NUT-unRAID/blob/0dd1395/packages/nut-2.8.5-x86_64-1stable.ssl31.txz (by desertwitch)
+# Deviations: OpenSSL on (Unraid's libssl.so.3); neon/ipmi/powerman off (their libraries are not on Unraid).
 set -euo pipefail
 
 PRGNAM=nut
@@ -53,9 +54,9 @@ CXXFLAGS="-O2 -fPIC -march=x86-64 -mtune=generic" \
   --with-pynut=no \
   --with-docs=no \
   --enable-docs-changelog=no \
-  --with-ssl=no \
+  --with-ssl=yes \
   --with-nss=no \
-  --with-openssl=no \
+  --with-openssl=yes \
   --with-wrap=no \
   --with-libsystemd=no \
   --with-augeas-lenses-dir=no \

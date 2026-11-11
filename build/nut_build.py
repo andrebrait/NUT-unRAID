@@ -152,6 +152,18 @@ def verify(args):
                 print(f"== {' '.join(command)}\n{output}", end="")
                 if not ok or LOCK["nut"]["version_forced"].split("-")[0] not in output:
                     failures.append(" ".join(command))
+            for path, libraries in LOCK["links"].items():
+                ok, output = check(root, ["/lib64/ld-linux-x86-64.so.2", "--list", path])
+                for library in libraries:
+                    resolved = [line.strip() for line in output.splitlines() if line.strip().startswith(f"{library} => /")]
+                    print(f"link: {path}: {resolved or library + ' MISSING'}")
+                    if not ok or not resolved:
+                        failures.append(f"{path} -> {library}")
+            # No upsd runs here, so the connection fails; only the client-side SSL setup output matters.
+            forbidden = LOCK["forbidden_output"]
+            _, output = check(root, forbidden["command"])
+            print(f"== {' '.join(forbidden['command'])}\n{output}", end="")
+            failures.extend(f"{forbidden['command'][0]} printed {pattern!r}" for pattern in forbidden["patterns"] if pattern in output)
         for fix in LOCK["fixes"]:
             if "binary" in fix:
                 if fix["binary_marker"].encode() not in (root / fix["binary"]).read_bytes():
