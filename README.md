@@ -1,3 +1,20 @@
+<div align="center">
+
+<img src="plugin/nut3.png" alt="NUT v3 logo" width="150">
+
+<h1>NUT v3 (Network UPS Tools)</h1>
+
+<p><strong>A refactored, modernized version of the original NUT plugin for <a href="https://unraid.net/">Unraid</a>, focused on frequent updates.</strong></p>
+
+<p>
+  <a href="https://github.com/andrebrait/NUT-unRAID/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/andrebrait/NUT-unRAID/test.yml?branch=master&label=tests" alt="Tests"></a>
+  <a href="https://github.com/andrebrait/NUT-unRAID/tags"><img src="https://img.shields.io/github/v/tag/andrebrait/NUT-unRAID?label=release&color=blue" alt="Latest tag"></a>
+  <img src="https://img.shields.io/badge/Unraid-7.3.4%2B-e8543f" alt="Supported Unraid versions">
+  <a href="LICENSE-GPL2"><img src="https://img.shields.io/badge/license-GPL--2.0%20%2F%20GPL--3.0-green" alt="License: GPL-2.0 or GPL-3.0"></a>
+</p>
+
+</div>
+
 ## Fork notice
 
 This is a maintained fork of [desertwitch/NUT-unRAID](https://github.com/desertwitch/NUT-unRAID) by desertwitch. Upstream has announced its end of support, so this fork carries on maintaining the plugin and publishes its own releases as **NUT v3 (Network UPS Tools)**, plugin `nut3`, based on desertwitch's NUT plugin.
@@ -20,13 +37,6 @@ Installing it replaces the earlier `nut-dw` plugin (NUT v2, the original or an e
 
 Report bugs and feature requests in the [issue tracker of this fork](https://github.com/andrebrait/NUT-unRAID/issues).
 
-
-NUT v3 (Network UPS Tools)
-================
-_A refactored, modernized version of the original NUT plugin with a focus on frequent updates._
-
-![GitHub Tag](https://img.shields.io/github/v/tag/andrebrait/NUT-unRAID?label=release&color=peru)
-[![CodeFactor](https://www.codefactor.io/repository/github/desertwitch/nut-unraid/badge)](https://www.codefactor.io/repository/github/desertwitch/nut-unraid)
 
 The NUT plugin for UNRAID has been developed by various people since 2015.
 
