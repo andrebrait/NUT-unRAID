@@ -2,11 +2,19 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  test, expect, root, b64, setCfg, flashChecksums, upsFiles, startUpsmon, settled, apply, applyRejected,
-  REPO, FLASH, FIXTURES, SETTINGS, NUT_FILES, MARK, BACKEND,
+  test, expect, root, sudo, b64, setCfg, flashChecksums, upsFiles, startUpsmon, settled, apply, applyRejected,
+  WORK, REPO, FLASH, FIXTURES, SETTINGS, NUT_FILES, MARK, BACKEND,
 } = require('./helpers');
 
 const field = (page, key) => page.locator(`textarea[data-field="${key}"]`);
+
+test('Unraid\'s installpkg runs the plugin package\'s install script', () => {
+  // Plugin bug: .github/workflows/package.yml archives "." so the members are "./install/doinst.sh" and
+  // "./install/slack-desc"; installpkg only knows "install/...", skips the script and shows no description.
+  // harness.py builds the package the same way and then runs the script itself. Remove this mark once fixed.
+  test.fail(true, 'package.yml builds packages whose install script installpkg never runs');
+  expect(sudo(['cat', path.join(WORK, 'install.log')])).toMatch(/Executing install script for nut-plugin-/);
+});
 
 test.describe('NUT Settings', () => {
   test('loads without JavaScript errors and labels the backends for Unraid 7.3.4+', async ({ page }) => {

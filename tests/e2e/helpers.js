@@ -81,22 +81,31 @@ async function applyRejected(page, ...errors) {
   await expect(dialog).toBeHidden();
 }
 
+// Unraid's own scripts. The test server runs no Unraid API or emhttpd, so what these log (API offline,
+// Chrome refusing their unload handlers) is not the plugin's doing; everything else fails the test.
+const UNRAID_SCRIPT = /^https?:\/\/[^/]+\/(webGui|plugins\/dynamix[^/]*)\//;
+
 const test = base.extend({
   // Every test starts from the freshly installed plugin and fails on JavaScript errors.
   page: async ({ page }, use, testInfo) => {
     sudo(['python3', path.join(__dirname, 'harness.py'), '--work', WORK, 'reset']);
     const problems = [];
-    const ignored = (description) => testInfo.annotations.push({ type: 'environment', description });
-    page.on('pageerror', (error) => problems.push(`page error: ${error.stack || error.message}`));
+    const ignored = (description) => testInfo.annotations.push({ type: 'Unraid, not the plugin', description });
+    page.on('pageerror', (error) => {
+      const text = `page error: ${error.stack || error.message}`;
+      const frames = (error.stack || '').match(/https?:\/\/[^\s)]+/g) || [];
+      if (frames.length && frames.every((url) => UNRAID_SCRIPT.test(url))) ignored(text);
+      else problems.push(text);
+    });
     page.on('console', (message) => {
       if (message.type() !== 'error') return;
-      const text = `${message.text()} (${message.location().url})`;
-      // no emhttpd or Unraid API runs here: failed loads outside the plugin are gaps of the test server
-      if ((/^Failed to load resource/.test(message.text()) && !message.location().url.includes('/plugins/nut-dw/'))
-        || /WebSocket connection to .*\/sub\//.test(message.text())) {
+      const url = message.location().url;
+      const text = `console error: ${message.text()} (${url})`;
+      // failed loads outside the plugin are gaps of the test server
+      if (UNRAID_SCRIPT.test(url) || (/^Failed to load resource/.test(message.text()) && !url.includes('/plugins/nut-dw/'))) {
         ignored(text);
       } else {
-        problems.push(`console error: ${text}`);
+        problems.push(text);
       }
     });
     page.on('response', (response) => {
@@ -111,6 +120,6 @@ const test = base.extend({
 });
 
 module.exports = {
-  test, expect, root, b64, setCfg, flashChecksums, upsFiles, startUpsmon, settled, apply, applyRejected,
-  REPO, FLASH, FIXTURES, SETTINGS, NUT_FILES, MARK, BACKEND,
+  test, expect, root, sudo, b64, setCfg, flashChecksums, upsFiles, startUpsmon, settled, apply, applyRejected,
+  WORK, REPO, FLASH, FIXTURES, SETTINGS, NUT_FILES, MARK, BACKEND,
 };

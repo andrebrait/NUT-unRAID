@@ -56,17 +56,29 @@ def fixtures(root):
         shutil.copy(source, target / source.name)
 
 
-def install(root):
+def install(root, work):
     packages = root / "tmp/nut-e2e-packages"
     packages.mkdir(parents=True)
     backend = f"{entity('nutNAME')}.txz"
     shutil.copy(REPO / "packages" / backend, packages / backend)
     plugin = f"nut-plugin-{entity('version')}-x86_64-1.txz"
+    # the same tar invocation as .github/workflows/package.yml
     run(["tar", "-C", REPO / "source/nut-dw", "--owner=0", "--group=0", "--sort=name", "-cJf", packages / plugin, "."])
     (root / FLASH).mkdir(parents=True)  # the .plg creates it before installing the package
-    # backend first, plugin last, as the .plg does on 7.3.4+
-    chroot(root, "/sbin/upgradepkg", "--install-new", f"/tmp/nut-e2e-packages/{backend}", f"/tmp/nut-e2e-packages/{plugin}")
+    # backend first, plugin last, as the .plg does on 7.3.4+; the log is checked by nut.spec.js
+    log = chroot(root, "/sbin/upgradepkg", "--install-new", f"/tmp/nut-e2e-packages/{backend}",
+                 f"/tmp/nut-e2e-packages/{plugin}", stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True).stdout
+    print(log, flush=True)
+    (work / "install.log").write_text(log)
     shutil.rmtree(packages)
+    if f"Executing install script for {plugin}" not in log:
+        # installpkg skipped the plugin's install script (see nut.spec.js); run it as installpkg would,
+        # so the pages are tested on a completely installed plugin
+        print(f"::warning::installpkg did not run the install script of {plugin}; running it", flush=True)
+        shutil.copy(REPO / "source/nut-dw/install/doinst.sh", root / "tmp/doinst.sh")
+        chroot(root, "/bin/sh", "-c", "cd / && sh /tmp/doinst.sh -install && rm /tmp/doinst.sh")
+    # TEMPORARY diagnostics
+    subprocess.run(["chroot", root, "/bin/sh", "-c", "ls -la /etc/rc.d; grep -n 218 /etc/group /etc/passwd; grep -n '^nut:' /etc/group /etc/passwd; ls -la /boot/config/plugins/nut-dw /install"])
 
     for name, directory in STUBS.items():
         shutil.copy(HERE / "stubs" / name, root / directory / name)
@@ -174,7 +186,7 @@ def up(args):
     image = {"url": target["url"], "sha256": target["sha256"], "file": f"unRAIDServer-{args.target}-x86_64.zip"}
     prepare_image(image, args.target, work / "inputs", root, target["bzroot_sha256"])
     shutil.rmtree(work / "inputs")
-    install(root)
+    install(root, work)
     state(root)
     snapshot(root)
     start(root, args.port)
