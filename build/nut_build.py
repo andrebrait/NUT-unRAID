@@ -166,14 +166,15 @@ def verify(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
+    # Work dirs must be traversable by the mapped sandbox UIDs; the runner's home is not.
     b = sub.add_parser("build")
     b.add_argument("--development-root", required=True)
     b.add_argument("--out", required=True)
-    b.add_argument("--work", default=os.environ.get("RUNNER_TEMP", "/tmp"))
+    b.add_argument("--work", default="/tmp")
     v = sub.add_parser("verify")
     v.add_argument("--target", required=True, choices=sorted(LOCK["targets"]))
     v.add_argument("--package", required=True)
-    v.add_argument("--work", default=os.environ.get("RUNNER_TEMP", "/tmp"))
+    v.add_argument("--work", default="/tmp")
     args = parser.parse_args()
     if sys.platform != "linux" or os.uname().machine != "x86_64" or os.geteuid() != 0:
         raise SystemExit("Requires a disposable Linux x86_64 runner and root")

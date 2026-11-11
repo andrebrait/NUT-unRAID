@@ -74,7 +74,7 @@ jobs:
           DEVELOPMENT_ROOT: ${{ steps.roots.outputs.development-root }}
         run: |
           sudo NERDTOOLS="$PWD/.nerdtools" python3 build/nut_build.py build \
-            --development-root "$DEVELOPMENT_ROOT" --out dist --work "$RUNNER_TEMP"
+            --development-root "$DEVELOPMENT_ROOT" --out dist --work /tmp
           sudo chown -R "$(id -u):$(id -g)" dist
           package=$(cd dist && ls nut-*.txz)
           (cd dist && md5sum "$package" > "$package.md5" && cat "$package.md5" && ls -l "$package")
@@ -119,7 +119,7 @@ jobs:
           UNRAID: ${{ matrix.unraid }}
         run: |
           sudo NERDTOOLS="$PWD/.nerdtools" python3 build/nut_build.py verify \
-            --target "$UNRAID" --package "$PACKAGE" --work "$RUNNER_TEMP"
+            --target "$UNRAID" --package "$PACKAGE" --work /tmp
 
   publish:
     needs: [build, verify]
