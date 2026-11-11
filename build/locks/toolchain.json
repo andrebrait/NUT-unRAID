@@ -349,5 +349,44 @@
       "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
       "checksum_md5": "199a04458b5d78c5fb56ef6c5ae043d2"
     }
+  },
+  {
+    "name": "guile",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/guile-3.0.11-x86_64-2.txz",
+    "file": "guile-3.0.11-x86_64-2.txz",
+    "sha256": "de5dc7e972ece2ea879b936e7cb7c2973b81b5b810949fb4aa4021d0696c0c03",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "signature_url": "https://slackware.uk/cumulative/slackware64-current/slackware64/d/guile-3.0.11-x86_64-2.txz.asc",
+      "signature_sha256": "ffbb0d6d286394759b7fef00bf5b4c419c184cfce9e71bdcd7425c79597498c2"
+    }
+  },
+  {
+    "name": "gc",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/gc-8.2.12-x86_64-2.txz",
+    "file": "gc-8.2.12-x86_64-2.txz",
+    "sha256": "31bb0d8b208c89d82f6a184c08105cb8806b7421b048567c2d9fa5d9656b3a72",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "0bfcc6a996725b9155cb773ba3938447"
+    }
+  },
+  {
+    "name": "libunistring",
+    "url": "https://slackware.uk/cumulative/slackware64-current/slackware64/l/libunistring-1.5-x86_64-1.txz",
+    "file": "libunistring-1.5-x86_64-1.txz",
+    "sha256": "a0ed8d953fecd6ec15e0713ed86b1dd394aff0d4c5260ee3738fd19d00af19d3",
+    "provenance": {
+      "kind": "upstream-binary",
+      "url": "https://www.slackware.com/gpg-key",
+      "revision": "EC5649DA401E22ABFA6736EF6A4463C040102233",
+      "checksum_manifest_sha256": "3633a700605516088e4a6202735e8e093a4cea10d8c41e383cb268c88613f48a",
+      "checksum_md5": "76fe0448e56247c85f62a5babc00ecde"
+    }
   }
 ]
