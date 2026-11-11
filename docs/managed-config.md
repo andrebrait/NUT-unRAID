@@ -1,6 +1,6 @@
 # Managed NUT configuration
 
-Since 2026.11.12 the plugin owns the NUT configuration, in the style of pfSense. It assembles complete
+The plugin owns the NUT configuration, in the style of pfSense. It assembles complete
 `nut.conf`, `ups.conf`, `upsd.conf`, `upsd.users`, `upsmon.conf` and `upssched.conf` files from its settings
 on every write, instead of patching numbered lines with `sed`. Users who need more add free-text custom
 directives, one field per file. The manual configuration modes (`MANUAL=enable|onlyups`) and the raw
