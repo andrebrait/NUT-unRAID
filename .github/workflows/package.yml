@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Package version (YYYY.MM.DD, optionally with a letter suffix)
+        description: Package version (YYYY.MM.DD, optionally .N for another release the same day)
         required: true
 
 permissions:
