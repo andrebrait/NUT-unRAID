@@ -152,8 +152,39 @@ function stub($path, $body) {
     file_put_contents($path, "#!/bin/bash\n$body\n");
     chmod($path, 0755);
 }
-stub("$bin/upsc", 'echo "$1" >> "$STUB/upsc.targets"; if [ -f "$STUB/upsc.down" ] && grep -qxF "$1" "$STUB/upsc.down"; then echo "Error: Data stale" >&2; exit 1; fi; [ -f "$STUB/upsc.$2" ] && cat "$STUB/upsc.$2"; exit 0');
-stub("$bin/upscmd", 'if [ "$1" == "-l" ]; then cat "$STUB/upscmd.list"; exit 0; fi; if [ -f "$STUB/upscmd.error" ]; then cat "$STUB/upscmd.error"; exit 1; fi; echo "$@" >> "$STUB/upscmd.calls"; exit 0');
+stub("$bin/upsc", <<<'SH'
+# like the real client: options end at "--" (or the first non-option), so a name with a leading hyphen needs "--"
+if [ "$1" = "--" ]; then shift; elif [ "${1#-}" != "$1" ]; then echo "upsc: invalid option $1" >&2; exit 1; fi
+echo "$1" >> "$STUB/upsc.targets"; echo "$2" >> "$STUB/upsc.vars"
+if [ -f "$STUB/upsc.down" ] && grep -qxF "$1" "$STUB/upsc.down"; then echo "Error: Data stale" >&2; exit 1; fi
+# upsc.seq.<variable>: one value per call, the last one repeats
+if [ -f "$STUB/upsc.seq.$2" ]; then
+    n=0; [ -f "$STUB/upsc.n.$2" ] && read -r n < "$STUB/upsc.n.$2"
+    echo $((n + 1)) > "$STUB/upsc.n.$2"
+    sed -n "$((n + 1))p" "$STUB/upsc.seq.$2" | grep -m1 '' || tail -n 1 "$STUB/upsc.seq.$2"
+    exit 0
+fi
+[ -f "$STUB/upsc.$2" ] && cat "$STUB/upsc.$2"
+exit 0
+SH);
+stub("$bin/upscmd", <<<'SH'
+# like the real client: options end at "--" (or the first non-option)
+list=0; kept=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -l) list=1; shift ;;
+        -u|-p) kept+=("$1" "$2"); shift 2 ;;
+        --) shift; break ;;
+        -*) echo "upscmd: invalid option $1" >&2; exit 1 ;;
+        *) break ;;
+    esac
+done
+echo "$1" >> "$STUB/upscmd.targets"
+if [ "$list" = 1 ]; then cat "$STUB/upscmd.list"; exit 0; fi
+if [ -f "$STUB/upscmd.error" ]; then cat "$STUB/upscmd.error"; exit 1; fi
+echo "${kept[*]} $*" >> "$STUB/upscmd.calls"
+exit 0
+SH);
 stub("$bin/logger", 'cat >> "$STUB/log"');
 stub("$bin/wall", 'cat >> "$STUB/wall"');
 stub("$bin/sleep", 'exit 0');
@@ -182,11 +213,13 @@ $batt = "$root/usr/sbin/nut-batttest";
 $cfg = "$tmp/nut3.cfg";
 file_put_contents($cfg, "NAME=\"ups\"\nIPADDR=\"127.0.0.1\"\nADMINUSER=\"upsadmin\"\nADMINPASS=\"" . $b('Adm1n!') . "\"\nBATTTESTTYPE=\"deep\"\n");
 $runBatt = fn(array $args = []) => run_bash("source '$batt'; CONFIG='$cfg'; NOTIFY='$tmp/notify'; main \"\$@\"", [], $args);
-$ready = function () use ($tmp) {
+// ups.test.result as the UPS reports it across the polls (the old value first, the last one repeats)
+$testResults = fn(string ...$lines) => file_put_contents("$tmp/upsc.seq.ups.test.result", implode("\n", $lines) . "\n");
+$ready = function () use ($tmp, $testResults) {
     reset_stub();
     file_put_contents("$tmp/upsc.ups.status", "OL\n");
     file_put_contents("$tmp/upsc.battery.charge", "100\n");
-    file_put_contents("$tmp/upsc.ups.test.result", "Done and passed\n");
+    $testResults('Done and passed', 'In progress', 'Done and passed');
     file_put_contents("$tmp/upscmd.list", "test.battery.start.quick - quick\ntest.battery.start.deep - deep\n");
 };
 $ready();
@@ -214,9 +247,31 @@ file_put_contents("$tmp/upscmd.list", "test.battery.start.quick - quick\n");
 $runBatt();
 check(stub_read('upscmd.calls') === '' && strpos(stub_read('log'), 'does not support') !== false, 'no test for a UPS without the command');
 $ready();
-file_put_contents("$tmp/upsc.ups.test.result", "Done and error\n");
+$testResults('Done and passed', 'In progress', 'Done and error');
 $runBatt();
 check(strpos(stub_read('notify.calls'), 'warning') !== false && strpos(stub_read('notify.calls'), 'did not pass') !== false, 'a failed test sends a warning');
+
+// a result counts once it differs from the one before the test or the test was seen running; an unchanged one is no pass
+$ready();
+$testResults('Done and error', 'Done and passed');
+$runBatt();
+check(strpos(stub_read('notify.calls'), 'finished') !== false && strpos(stub_read('notify.calls'), 'normal') !== false, 'a new result is accepted without ever seeing the test running: ' . stub_read('notify.calls'));
+$ready();
+$testResults('Done and passed');
+$runBatt();
+$notified = stub_read('notify.calls');
+check(strpos($notified, 'warning') !== false && strpos($notified, 'could not be verified') !== false && strpos($notified, 'from before the test') !== false, 'the unchanged result of an earlier test is reported as unverified: ' . $notified);
+check(strpos($notified, 'finished') === false && strpos($notified, 'normal') === false, 'the unchanged result of an earlier test is not reported as a pass: ' . $notified);
+check(strpos(stub_read('log'), 'could not be verified') !== false, 'an unverified result is logged');
+check(count_lines(stub_read('upsc.vars'), 'ups.test.result') === 73, 'an unchanged result is polled for the whole 10 minutes, not accepted after 60 seconds: ' . count_lines(stub_read('upsc.vars'), 'ups.test.result'));
+$ready();
+$testResults('Done and passed', 'In progress');
+$runBatt();
+check(strpos(stub_read('notify.calls'), 'warning') !== false && strpos(stub_read('notify.calls'), 'still in progress') !== false && strpos(stub_read('notify.calls'), 'normal') === false, 'a test that never finishes is reported as unverified: ' . stub_read('notify.calls'));
+$ready();
+unlink("$tmp/upsc.seq.ups.test.result");
+$runBatt();
+check(strpos(stub_read('notify.calls'), 'warning') !== false && strpos(stub_read('notify.calls'), 'reported no result') !== false && strpos(stub_read('notify.calls'), 'normal') === false, 'a UPS that reports no result is reported as unverified: ' . stub_read('notify.calls'));
 $ready();
 file_put_contents($cfg, "NAME=\"ups\"\nIPADDR=\"127.0.0.1\"\nADMINUSER=\"\"\nADMINPASS=\"\"\n");
 [$code] = $runBatt();
@@ -254,6 +309,17 @@ $ready();
 $battCfg('', '10.0.0.5');
 $runBatt();
 check($targets() === ['ups@10.0.0.5'] && strpos(stub_read('upscmd.calls'), 'ups@10.0.0.5 test.battery.start.quick') !== false, 'the configured UPS is tested at its configured address: ' . implode(' ', $targets()));
+
+// a UPS name starting with a hyphen is a name for the clients, not an option
+$ready();
+$battCfg("BATTTESTUPS=\"-lead\"\n");
+[$code] = $runBatt();
+check($code === 0 && trim(stub_read('upscmd.calls')) === '-u upsadmin -p Adm1n! -lead@127.0.0.1 test.battery.start.quick', 'an additional hyphen-named UPS is tested: ' . stub_read('upscmd.calls') . stub_read('log'));
+check($targets() === ['-lead@127.0.0.1'] && array_values(array_unique(array_filter(explode("\n", stub_read('upscmd.targets')), 'strlen'))) === ['-lead@127.0.0.1'], 'upsc and upscmd are asked for the whole hyphen-named UPS: ' . implode(' ', $targets()));
+$ready();
+file_put_contents($cfg, "NAME=\"-main\"\nIPADDR=\"10.0.0.5\"\nADMINUSER=\"upsadmin\"\nADMINPASS=\"" . $b('Adm1n!') . "\"\n");
+[$code] = $runBatt();
+check($code === 0 && $targets() === ['-main@10.0.0.5'] && trim(stub_read('upscmd.calls')) === '-u upsadmin -p Adm1n! -main@10.0.0.5 test.battery.start.quick', 'the configured hyphen-named UPS is tested at its address: ' . stub_read('upscmd.calls') . stub_read('log'));
 
 // rc.nut write_batttest_cron: the cron file follows the schedule and is only rewritten on change
 $rc = file_get_contents("$root/etc/rc.d/rc.nut");
@@ -387,9 +453,10 @@ if (preg_match('#(?<!' . preg_quote($ns, '#') . ')/etc/nutstats|/boot/config|/us
 file_put_contents("$tmp/rc.nutstats", $rcStats);
 stub("$ns/nutstats-run", 'exit 0');
 stub("$obs/update_cron", 'exit 0');
-// every command that may touch the copy reports its mode afterwards, so the states between the commands are seen
-$observe = '[ -e "$STATSCFG" ] && stat -c %a "$STATSCFG" >> "$STUB/statscfg.modes"';
-foreach (['install', 'cp', 'chmod', 'ln', 'mkdir'] as $cmd) {
+// every command that may touch the copy reports the mode of each file holding the new settings (the copy and any temp file beside it),
+// so the states between the commands are seen
+$observe = 'for f in "$STATSCFG" "${STATSCFG%/*}"/.nut3.cfg.*; do [ -f "$f" ] && grep -qF "$SECRET" "$f" && stat -c %a "$f" >> "$STUB/statscfg.modes"; done';
+foreach (['install', 'cp', 'chmod', 'ln', 'mkdir', 'mv'] as $cmd) {
     stub("$obs/$cmd", trim((string)shell_exec("command -v $cmd")) . " \"\$@\"; rc=\$?; $observe; exit \$rc");
 }
 stub("$obs/chown", "$observe; exit 0");
@@ -402,7 +469,7 @@ $modeOf = fn($path) => is_file($path) ? substr(sprintf('%o', fileperms($path)), 
 file_put_contents("$ns/plg/nut3.cfg", "STATISTICS=\"enable\"\nSTATSPOLL=\"01min\"\nADMINPASS=\"" . $b('S3cret!') . "\"\n");
 chmod("$ns/plg/nut3.cfg", 0755);
 @unlink("$tmp/statscfg.modes");
-run_bash("umask 000; bash '$tmp/rc.nutstats' enable", $statsEnv);
+run_bash("umask 000; bash '$tmp/rc.nutstats' enable", ['SECRET' => $b('S3cret!')] + $statsEnv);
 clearstatcache();
 check(is_file($copy) && file_get_contents($copy) === file_get_contents("$ns/plg/nut3.cfg"), 'rc.nutstats copies the settings for the statistics');
 check($modeOf($copy) === '0600', 'the new settings copy is 0600 whatever the umask and the mode of the source: ' . $modeOf($copy));
@@ -413,11 +480,24 @@ chmod($copy, 0666);
 link($copy, "$ns/stale-copy"); // keeps the old file alive, so an in-place rewrite of it can be told from a replacement
 file_put_contents("$ns/plg/nut3.cfg", "STATISTICS=\"enable\"\nSTATSPOLL=\"01min\"\nADMINPASS=\"" . $b('N3w!') . "\"\n");
 @unlink("$tmp/statscfg.modes");
-run_bash("umask 000; bash '$tmp/rc.nutstats' enable", $statsEnv);
+run_bash("umask 000; bash '$tmp/rc.nutstats' enable", ['SECRET' => $b('N3w!')] + $statsEnv);
 clearstatcache();
 check($modeOf($copy) === '0600' && file_get_contents($copy) === file_get_contents("$ns/plg/nut3.cfg"), 'an update replaces a looser settings copy with a 0600 file: ' . $modeOf($copy));
 check($observed() !== [] && $exposed() === [], 'an update never exposes the new settings in a looser file: ' . implode(' ', $observed()));
 check(file_get_contents("$ns/stale-copy") === "STATISTICS=\"enable\"\nADMINPASS=\"old\"\n", 'an update does not rewrite the old copy in place');
+
+// a failed install keeps the previous copy (content and mode) and leaves no temp file behind
+$failBin = "$tmp/failbin";
+mkdir($failBin, 0700);
+stub("$failBin/install", 'exit 1');
+file_put_contents($copy, "STATISTICS=\"enable\"\nADMINPASS=\"kept\"\n");
+chmod($copy, 0600);
+file_put_contents("$ns/plg/nut3.cfg", "STATISTICS=\"enable\"\nSTATSPOLL=\"01min\"\nADMINPASS=\"" . $b('Newer!') . "\"\n");
+[, $out] = run_bash("umask 000; bash '$tmp/rc.nutstats' enable", ['PATH' => "$failBin:" . $statsEnv['PATH'], 'SECRET' => $b('Newer!')] + $statsEnv);
+clearstatcache();
+check(file_get_contents($copy) === "STATISTICS=\"enable\"\nADMINPASS=\"kept\"\n" && $modeOf($copy) === '0600', 'a failed install keeps the previous settings copy: ' . $modeOf($copy));
+check(glob("$ns/etc/nutstats/.nut3.cfg.*") === [], 'a failed install leaves no temp file behind: ' . implode(' ', glob("$ns/etc/nutstats/.nut3.cfg.*")));
+check(strpos($out, 'keeping the previous one') !== false, 'a failed install is reported: ' . $out);
 
 
 exec('rm -rf ' . escapeshellarg($tmp));

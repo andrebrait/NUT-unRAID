@@ -479,11 +479,14 @@ write_config() {
     return $RETVAL
 }
 
-# UPS names to power off: the configured UPS plus every local UPS that upsmon.conf monitors with a power value above 0
-# (legacy redundant setups, any role); UPSes with power value 0 are only watched and stay on, remote systems are not ours.
+# UPS names to power off: the configured UPS plus every UPS that upsmon.conf monitors with a power value above 0 on this
+# system (legacy redundant setups, any role): a loopback host on a port the local upsd listens on. That is the port of a
+# loopback or wildcard LISTEN line of the upsd.conf in use (3493 without a port, and without any LISTEN line), so a monitor of
+# another daemon on the same host can never power off a local UPS of the same name; a LISTEN line that cannot be read adds
+# no port. UPSes with power value 0 are only watched and stay on, remote systems are not ours.
 # The word splitting follows NUT's parseconf (quotes, backslash escapes, # comments); malformed lines are skipped.
 monitored_power_ups() {
-    awk '
+    { cat /etc/nut/upsd.conf 2>/dev/null; printf '\n@@UPSMON@@\n'; cat /etc/nut/upsmon.conf 2>/dev/null; } | awk '
     function words(line,    i, ch, st, have, cur) {
         nw = 0; st = 0; have = 0
         for (i = 1; i <= length(line); i++) {
@@ -516,13 +519,28 @@ monitored_power_ups() {
         if (have) w[++nw] = cur
         return 1
     }
+    !part && $0 == "@@UPSMON@@" { if (!nlisten) lport[3493] = 1; part = 1; next }
     {
-        if (!words($0) || nw < 6 || toupper(w[1]) != "MONITOR") next
+        if (!words($0)) next
+        if (!part) {
+            if (toupper(w[1]) != "LISTEN") next
+            nlisten++
+            if (nw < 2 || nw > 3 || (nw == 3 && w[3] !~ /^[0-9]+$/)) next
+            if (tolower(w[2]) ~ /^(127\.0\.0\.1|localhost|::1|0\.0\.0\.0|::)$/) lport[nw == 3 ? w[3] + 0 : 3493] = 1
+            next
+        }
+        if (nw < 6 || toupper(w[1]) != "MONITOR") next
         if (w[3] !~ /^[0-9]+$/ || w[3] + 0 == 0) next
         at = index(w[2], "@")
         if (at < 2) next
-        if (tolower(substr(w[2], at + 1)) ~ /^((127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?|::1)$/) print substr(w[2], 1, at - 1)
-    }' /etc/nut/upsmon.conf 2>/dev/null
+        hp = tolower(substr(w[2], at + 1))
+        if (hp ~ /^\[::1\](:[0-9]+)?$/) sub(/^\[::1\]:?/, "", hp)
+        else if (hp ~ /^(127\.0\.0\.1|localhost)(:[0-9]+)?$/) sub(/^(127\.0\.0\.1|localhost):?/, "", hp)
+        else if (hp == "::1") hp = ""
+        else next
+        port = (hp == "" ? 3493 : hp + 0)
+        if (port in lport) print substr(w[2], 1, at - 1)
+    }'
 }
 
 # power off the UPS inverters; each name goes to upsdrvctl on its own, never an empty one (that would mean every driver)

@@ -32,18 +32,18 @@ main() {
 
     local status charge
     # no status means the UPS is gone (renamed or removed), unreachable or stale: the schedule can never run, so say so
-    if ! status="$(timeout 10 upsc "$target" ups.status 2>/dev/null)" || [ -z "$status" ]; then
+    if ! status="$(timeout 10 upsc -- "$target" ups.status 2>/dev/null)" || [ -z "$status" ]; then
         local why
-        why="$(timeout 10 upsc "$target" ups.status 2>&1 >/dev/null | tail -n 1)"
+        why="$(timeout 10 upsc -- "$target" ups.status 2>&1 >/dev/null | tail -n 1)"
         log "Skipped, the UPS is not available: ${why:-no answer}."
         notify warning Warning "The scheduled $type battery self-test was skipped: the UPS is not available (${why:-no answer}). Check that it still exists on the NUT Settings page and that NUT is running."; exit 1
     fi
-    charge="$(timeout 10 upsc "$target" battery.charge 2>/dev/null)"
+    charge="$(timeout 10 upsc -- "$target" battery.charge 2>/dev/null)"
     if [[ " $status " != *" OL "* ]]; then log "Skipped, UPS status is '$status' (not OL)."; exit 0; fi
     if [[ ! "$charge" =~ ^[0-9]+([.][0-9]+)?$ ]] || [ "${charge%.*}" -lt 90 ]; then
         log "Skipped, battery charge is '${charge:-unknown}' (needs 90% or more)."; exit 0
     fi
-    if ! timeout 10 upscmd -l "$target" 2>/dev/null | awk -v c="$cmd" '$1 == c { f = 1 } END { exit !f }'; then
+    if ! timeout 10 upscmd -l -- "$target" 2>/dev/null | awk -v c="$cmd" '$1 == c { f = 1 } END { exit !f }'; then
         log "Skipped, UPS does not support $cmd."; exit 0
     fi
 
@@ -55,30 +55,38 @@ main() {
         notify warning Warning "The scheduled $type battery self-test was skipped: no NUT Admin user and password are set on the NUT Settings page."; exit 1
     fi
 
-    local old out
-    old="$(timeout 10 upsc "$target" ups.test.result 2>/dev/null)"
-    if ! out="$(timeout 30 upscmd -u "$user" -p "$pass" "$target" "$cmd" 2>&1)"; then
+    local old out why
+    old="$(timeout 10 upsc -- "$target" ups.test.result 2>/dev/null)"
+    if ! out="$(timeout 30 upscmd -u "$user" -p "$pass" -- "$target" "$cmd" 2>&1)"; then
         out="${out//"$pass"/***}"
         log "Could not start $cmd: $out"
         notify warning Warning "The $type battery self-test could not be started: $out"; exit 1
     fi
     log "Started $cmd."
 
-    # poll up to 10 minutes; an unchanged result only counts as new once the test was seen running or 60s passed
-    local t=0 seen=0 res=""
+    # poll up to 10 minutes; a result only counts once it differs from the one before the test or the test was seen
+    # running: an unchanged one may be left over from an earlier test, so it is reported as unverified, never as a pass
+    local t=0 seen=0 res="" cur="" delay
     while [ "$t" -lt 600 ]; do
-        sleep 10; t=$((t + 10))
-        res="$(timeout 10 upsc "$target" ups.test.result 2>/dev/null)"
-        if [[ "${res,,}" == *progress* ]]; then seen=1; continue; fi
-        if [ -n "$res" ] && { [ "$seen" = 1 ] || [ "$res" != "$old" ] || [ "$t" -ge 60 ]; }; then break; fi
-        res=""
+        if [ "$t" -lt 30 ]; then delay=2; else delay=10; fi
+        sleep "$delay"; t=$((t + delay))
+        cur="$(timeout 10 upsc -- "$target" ups.test.result 2>/dev/null)"
+        if [[ "${cur,,}" == *progress* ]]; then seen=1; continue; fi
+        if [ -n "$cur" ] && { [ "$seen" = 1 ] || [ "$cur" != "$old" ]; }; then res="$cur"; break; fi
     done
 
-    log "Result: ${res:-none within 10 minutes}"
-    if [[ "${res,,}" == *passed* ]]; then
+    if [ -z "$res" ]; then
+        if [ "$seen" = 1 ]; then why="it was still in progress"
+        elif [ -n "$cur" ]; then why="the UPS still reports the result from before the test (${cur})"
+        else why="the UPS reported no result"; fi
+        log "Result could not be verified within 10 minutes: ${why}."
+        notify warning Warning "The $type battery self-test was started, but its result could not be verified within 10 minutes: ${why}."
+    elif [[ "${res,,}" == *passed* ]]; then
+        log "Result: $res"
         notify normal Notice "The $type battery self-test finished: $res."
     else
-        notify warning Warning "The $type battery self-test did not pass: ${res:-no result within 10 minutes}."
+        log "Result: $res"
+        notify warning Warning "The $type battery self-test did not pass: $res."
     fi
 }
 

@@ -191,10 +191,13 @@ function nut_mc_extra_ups(array $c) {
     return array_values(array_unique(array_column($headers, 'section')));
 }
 
-/* UPS name of a MONITOR system ("name@host[:port]") that this machine serves itself, null for any other system. */
-function nut_mc_local_ups($system) {
+/* UPS name of a MONITOR system ("name@host[:port]") on this machine's loopback, null for any other system. Unless
+ * $anyPort, only the system without a port or on NUT's default port 3493 counts: that is where the generated upsd
+ * listens, a system on another port is another server's. The forms are those of rc.nut's monitored_power_ups. */
+function nut_mc_local_ups($system, $anyPort = false) {
     [$name, $host] = array_pad(explode('@', (string)$system, 2), 2, '');
-    return preg_match('/^(127\.0\.0\.1|localhost|\[?::1\]?)(:[0-9]+)?$/i', $host) ? $name : null;
+    if (!preg_match('/^(?:(?:127\.0\.0\.1|localhost|\[::1\])(?::([0-9]+))?|::1)$/i', $host, $m)) return null;
+    return $anyPort || !isset($m[1]) || (int)$m[1] === 3493 ? $name : null;
 }
 
 function nut_mc_generate(array $c, $withCustom = true) {
@@ -537,6 +540,21 @@ function nut_mc_upsmon_directive(array $d, array &$set, array &$taken, array $le
     return true;
 }
 
+/* True for a upssched.conf directive that the nut-dw backend generated from ONBATTDELAY and EARLYSTAGE ($c): the
+ * settings generate it again. A timer line with another delay is not one, it was written or edited by hand. */
+function nut_mc_legacy_sched_line(array $words, array $c) {
+    $patterns = ['CMDSCRIPT /usr/sbin/nut-upssched-cmd', 'PIPEFN /var/run/nut/upssched\.pipe', 'LOCKFN /var/run/nut/upssched\.lock'];
+    foreach (['alert' => $c['ONBATTDELAY'], 'early' => $c['EARLYSTAGE']] as $timer => $delay) {
+        if (!preg_match('/^[1-9][0-9]*$/', $delay)) continue;
+        $patterns[] = "AT ONBATT (\\S+) START-TIMER $timer:\\1 $delay";
+        $patterns[] = "AT ONLINE (\\S+) CANCEL-TIMER $timer:\\1" . ($timer === 'alert' ? ' online:\1' : '');
+    }
+    foreach ($patterns as $pattern) {
+        if (preg_match("~^$pattern$~D", implode(' ', $words))) return true;
+    }
+    return false;
+}
+
 /*
  * Import a previous configuration: $cfg is the old nut3.cfg, $files the old NUT files (name => text|null).
  * Returns [settings, notes]. Recognised directives become settings, everything else lands in the
@@ -611,8 +629,8 @@ function nut_mc_import(array $cfg, array $files) {
     $monitor = null;
     foreach ($entries as $d) {
         if ($d['error'] || count($d['words']) !== 6 || strtoupper($d['words'][0]) !== 'MONITOR') continue;
-        // the line of another UPS of ups.conf is not the shutdown UPS's: it stays a custom directive, credentials included
-        if (($local = nut_mc_local_ups($d['words'][1])) !== null && isset($others[$local])) continue;
+        // the line of another UPS of ups.conf (on any port) is not the shutdown UPS's: it stays a custom directive, credentials included
+        if (($local = nut_mc_local_ups($d['words'][1], true)) !== null && isset($others[$local])) continue;
         $monitor = $monitor ?? $d;
         if (explode('@', $d['words'][1])[0] === $c['NAME']) {
             $monitor = $d;
@@ -735,9 +753,16 @@ function nut_mc_import(array $cfg, array $files) {
         }
         $custom['CUSTOM_NUT'][] = $d['raw'];
     }
-    // the nut-dw backend rewrote its upssched.conf from the settings at every start, so it holds nothing of the user's
-    $legacySched = strncmp((string)($files['upssched.conf'] ?? ''), NUT_MC_LEGACY_SCHED, strlen(NUT_MC_LEGACY_SCHED)) === 0;
-    $custom['CUSTOM_UPSSCHED'] = $legacySched ? [] : array_column($parse('upssched.conf'), 'raw');
+    // The nut-dw backend rewrote its upssched.conf from the settings at every start, except in manual mode, which left
+    // the file alone: there the user's own lines may stand next to the generated ones (generated again from the settings).
+    $sched = $parse('upssched.conf');
+    if (strncmp((string)($files['upssched.conf'] ?? ''), NUT_MC_LEGACY_SCHED, strlen(NUT_MC_LEGACY_SCHED)) === 0) {
+        $own = array_filter($sched, fn($d) => !nut_mc_legacy_sched_line($d['words'], $c));
+        // with no timer set nothing is generated, so the lines of the file stay together: the user's lines need its CMDSCRIPT
+        $timers = (int)$c['ONBATTDELAY'] > 0 || (int)$c['EARLYSTAGE'] > 0;
+        $sched = $manual === 'enable' ? ($own && !$timers ? $sched : $own) : [];
+    }
+    $custom['CUSTOM_UPSSCHED'] = array_column($sched, 'raw');
 
     if (!$slave && $c['IPADDR'] !== '127.0.0.1') {
         if (!in_array(explode(':', $c['IPADDR'])[0], ['127.0.0.1', 'localhost'], true)) {
@@ -746,20 +771,26 @@ function nut_mc_import(array $cfg, array $files) {
         $c['IPADDR'] = '127.0.0.1';
     }
     if ($others) {
-        $monitored = []; // other UPS => power value of its MONITOR line, kept in the custom directives
+        $monitored = []; // other UPS => power values of its MONITOR lines, kept in the custom directives
+        $replaced = [];  // the other UPSes whose kept MONITOR line replaces the generated one (see nut_mc_generate)
         foreach (nut_mc_parse(implode("\n", $custom['CUSTOM_UPSMON'])) as $d) {
-            $name = !$d['error'] && strtoupper($d['words'][0] ?? '') === 'MONITOR' ? nut_mc_local_ups($d['words'][1] ?? '') : null;
-            if ($name !== null && isset($others[$name])) $monitored[$name] = $d['words'][2] ?? '';
+            $system = $d['words'][1] ?? '';
+            $name = !$d['error'] && strtoupper($d['words'][0] ?? '') === 'MONITOR' ? nut_mc_local_ups($system, true) : null;
+            if ($name === null || !isset($others[$name])) continue;
+            $monitored[$name][] = $d['words'][2] ?? '';
+            if (nut_mc_local_ups($system) !== null) $replaced[$name] = true;
         }
         $notes[] = 'ups.conf: more than one UPS section was found. The other sections, [' . implode('], [', array_keys($others))
             . "], were kept in the ups.conf (UPS section) custom directives; \"{$c['NAME']}\" is the UPS that shuts this system down.";
-        if ($watched = array_diff(array_keys($others), array_keys($monitored))) {
+        if ($watched = array_diff(array_keys($others), array_keys($replaced))) {
             $notes[] = 'upsmon.conf: [' . implode('], [', $watched) . '] ' . (count($watched) > 1 ? 'are' : 'is')
                 . ' now only watched: the generated MONITOR line has power value 0, so no shutdown starts from it. A MONITOR line in the upsmon.conf custom directives replaces it.';
         }
-        foreach ($monitored as $name => $power) {
-            if ($power !== '0') {
-                $notes[] = "upsmon.conf: the MONITOR line of UPS \"$name\" (power value $power) was kept as a custom directive. It counts as a power supply for upsmon (see MINSUPPLIES), use power value 0 to only watch that UPS.";
+        foreach ($monitored as $name => $powers) {
+            foreach ($powers as $power) {
+                if ($power !== '0') {
+                    $notes[] = "upsmon.conf: the MONITOR line of UPS \"$name\" (power value $power) was kept as a custom directive. It counts as a power supply for upsmon (see MINSUPPLIES), use power value 0 to only watch that UPS.";
+                }
             }
         }
     }

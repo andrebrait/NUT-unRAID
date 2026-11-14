@@ -100,15 +100,34 @@ fi
 [[ "$ONBATTDELAY" =~ ^[0-9]+$ ]] || ONBATTDELAY=0
 [[ "$EARLYSTAGE" =~ ^[0-9]+$ ]] || EARLYSTAGE=0
 DELAYALERT=0
-if [ -n "$UPSNAME" ] && { [ "$ONBATTDELAY" -gt 0 ] || [ "$EARLYSTAGE" -gt 0 ]; } \
-    && { [ "$NOTIFYTYPE" == "ONBATT" ] || [ "$NOTIFYTYPE" == "ONLINE" ]; }; then
-    # no inherited pipes: upssched may leave a background daemon behind
-    if timeout 15 /usr/sbin/upssched "$1" </dev/null >/dev/null 2>&1; then
+LATE=0
+# online and not on battery: a status naming both (or neither), or no answer at all, proves nothing
+power_is_back() {
+    local s
+    s=" $(timeout "$1" /usr/bin/upsc -- "$UPS" ups.status 2>/dev/null) "
+    [[ "$s" == *" OL "* && "$s" != *" OB "* ]]
+}
+feed_upssched() {
+    [ -n "$UPSNAME" ] && { [ "$ONBATTDELAY" -gt 0 ] || [ "$EARLYSTAGE" -gt 0 ]; } \
+        && { [ "$NOTIFYTYPE" == "ONBATT" ] || [ "$NOTIFYTYPE" == "ONLINE" ]; } || return 0
+    # A late start (ONLINE was handled first) must not leave a timer behind: only two readings a second apart that both
+    # say power is back make it one. Any other reading is the outage it was reported as; the worker is never touched.
+    if [ "$NOTIFYTYPE" == "ONBATT" ] && power_is_back 5 && { sleep 1; power_is_back 5; }; then
+        LATE=1
+        return 0
+    fi
+    # no inherited pipes: upssched may leave a background daemon behind; in the background so that a signal ends the wait at once
+    timeout 15 /usr/sbin/upssched "$1" </dev/null >/dev/null 2>&1 &
+    SCHED_PID=$!
+    if wait "$SCHED_PID"; then
         [ "$ONBATTDELAY" -gt 0 ] && DELAYALERT=1
     else
         echo "Error: upssched failed, sending alerts without delay..." | logger -t "nut-notify[$$]"
     fi
-fi
+    SCHED_PID=""
+}
+# ONLINE starts no shutdown criteria, so it can ask upssched right here; ONBATT does it beside them (see below)
+[ "$NOTIFYTYPE" == "ONBATT" ] || feed_upssched "$1"
 
 if [ "$NOTIFYTYPE" == "ONLINE" ]
 then
@@ -146,24 +165,39 @@ then
             MESSAGE="This is not the UPS configured for shutdown in the GUI ([${NAME}@${IPADDR}])."
         fi
 
-        if [ "$DELAYALERT" == "1" ]; then
-            echo "[${UPS}] UPS is on battery (alert delayed by ${ONBATTDELAY}s). ${MESSAGE}" | logger -t "nut-notify[$$]"
-        else
-            echo "[${UPS}] UPS is on battery. ${MESSAGE}" | tee >(wall) >(logger -t "nut-notify[$$]")
-        fi
+        # The alerts wait for upssched's answer, but beside the shutdown criteria: a hung upssched (up to 15 seconds)
+        # or notification must never delay them. ONLINE ends this subshell together with the worker (same UPSNAME).
+        (
+            # A cancelled worker (ONLINE, rc.nut stop) takes an upssched call that is still on its way along: delivered
+            # after the cancel of ONLINE it would start a timer that nothing stops.
+            SCHED_PID=""
+            trap '[ -n "$SCHED_PID" ] && kill "$SCHED_PID" 2>/dev/null; exit 0' TERM
 
-        if [ "$(type -t "ONBATT")" == "function" ]; then
-            echo "Executing user's hook script for ONBATT (as non-blocking)..." | logger -t "nut-notify[$$]"
-            ( ONBATT 2>&1 | logger -t "xnut-notify-hooks.sh[$$]" ) &
-        fi
+            feed_upssched "$1"
+            trap - TERM
 
-        if [ "$DELAYALERT" != "1" ]; then
-            echo "Sending OS notifications..." | logger -t "nut-notify[$$]"
-            timeout -s9 15 "$NOTIFY" -e "${EVENT}" -s "Alert ${SUBJECT} On Battery" -d "UPS is on battery. ${MESSAGE}" -i "alert"
-            if [ $? -gt 100 ]; then
-                echo "OS notifications could not be sent within 15 seconds." | logger -t "nut-notify[$$]"
+            if [ "$LATE" == "1" ]; then
+                echo "[${UPS}] UPS power is already back, no alert or timer for this late on-battery event." | logger -t "nut-notify[$$]"
+            elif [ "$DELAYALERT" == "1" ]; then
+                echo "[${UPS}] UPS is on battery (alert delayed by ${ONBATTDELAY}s). ${MESSAGE}" | logger -t "nut-notify[$$]"
+            else
+                echo "[${UPS}] UPS is on battery. ${MESSAGE}" | tee >(wall) >(logger -t "nut-notify[$$]")
             fi
-        fi
+
+            if [ "$LATE" != "1" ] && [ "$(type -t "ONBATT")" == "function" ]; then
+                echo "Executing user's hook script for ONBATT (as non-blocking)..." | logger -t "nut-notify[$$]"
+                ( ONBATT 2>&1 | logger -t "xnut-notify-hooks.sh[$$]" ) &
+            fi
+
+            if [ "$DELAYALERT" != "1" ] && [ "$LATE" != "1" ]; then
+                echo "Sending OS notifications..." | logger -t "nut-notify[$$]"
+                timeout -s9 15 "$NOTIFY" -e "${EVENT}" -s "Alert ${SUBJECT} On Battery" -d "UPS is on battery. ${MESSAGE}" -i "alert"
+                if [ $? -gt 100 ]; then
+                    echo "OS notifications could not be sent within 15 seconds." | logger -t "nut-notify[$$]"
+                fi
+            fi
+        ) &
+        ALERTS=$!
 
         if [ "$SHUTDOWN" != "none" ]; then
             echo "Shutdown criteria are now being monitored..." | logger -t "nut-notify[$$]"
@@ -178,7 +212,7 @@ then
                 done
             else
                 nodata_since=""
-                timer=$(timeout 10 /usr/bin/upsc "$UPS" "$BATTERY" 2>/dev/null)
+                timer=$(timeout 10 /usr/bin/upsc -- "$UPS" "$BATTERY" 2>/dev/null)
                 # Loop with one second interval to allow SIGTERM reception.
                 # Keep looping while above the threshold; on battery with no usable data for 120s, shut down anyway.
                 while [ -z "$timer" ] || [[ ! "$timer" =~ ^[0-9]+([.][0-9]+)?$ ]] || [ "$(printf "%.0f" "$timer")" -gt "$TIMER" ]
@@ -194,7 +228,7 @@ then
                         nodata_since=""
                     fi
                     sleep 1
-                    timer=$(timeout 10 /usr/bin/upsc "$UPS" "$BATTERY" 2>/dev/null)
+                    timer=$(timeout 10 /usr/bin/upsc -- "$UPS" "$BATTERY" 2>/dev/null)
                 done
             fi
 
@@ -213,14 +247,17 @@ then
             fi
 
             # power may have returned while the criteria were met and the notifications went out
-            if [[ " $(timeout 10 /usr/bin/upsc "$UPS" ups.status 2>/dev/null) " == *" OL "* ]]; then
+            if power_is_back 10; then
                 echo "[${UPS}] UPS is online again, FSD cancelled." | logger -t "nut-notify[$$]"
+                wait "$ALERTS"
                 exit 0
             fi
 
             echo "Setting FSD (= point of no return)..." | logger -t "nut-notify[$$]"
             /usr/sbin/upsmon -c fsd
         fi
+
+        wait "$ALERTS"
 
 elif [ "$NOTIFYTYPE" == "REPLBATT" ]
 then

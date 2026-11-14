@@ -40,7 +40,10 @@ function getNUTfooter() {
     if (nutSkipIfHidden('getNUTfooter', getNUTfooter, <?=$nut_poll_ms?>)) return;
     $.get('/plugins/nut3/include/nut_footer.php', function(data) {
         if(data && data.success && data.success.response) {
-            animed = $("#nut_footer").find("i[class^='fa fa-battery-discharging'], i[class^='fa fa-battery-charging']");
+            // wait for an iteration only where the icon animates: prefers-reduced-motion switches it off and none would ever come
+            animed = $("#nut_footer").find("i[class^='fa fa-battery-discharging'], i[class^='fa fa-battery-charging']").filter(function() {
+                return getComputedStyle(this, '::before').animationName !== 'none';
+            });
             hovered = $(".tooltip-nut:hover").map(function() {
                 return this.id;
             }).get();

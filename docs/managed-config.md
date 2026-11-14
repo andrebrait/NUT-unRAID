@@ -52,7 +52,7 @@ is checked against those keys. Keys compare case-insensitively. The upsmon direc
 `NOTIFYFLAG ONBATT` is a conflict. A directive the settings do not currently emit, for example
 `debug_min` while the driver debug level is "Default", may go in the custom field. Further rules:
 
-- `CUSTOM_UPSGLOBAL` may not open a section. `CUSTOM_UPS` may add UPS sections after the configured UPS's directives; each additional UPS needs a unique name, `driver` and `port`. Generated monitors use power value 0 and the `slave` role. A custom local `MONITOR` line replaces its generated monitor and may change shutdown behavior.
+- `CUSTOM_UPSGLOBAL` may not open a section. `CUSTOM_UPS` may add UPS sections after the configured UPS's directives; each additional UPS needs a unique name, `driver` and `port`. Generated monitors use power value 0 and the `slave` role. A custom loopback `MONITOR` on the default NUT port replaces its generated monitor and may change shutdown behavior; a monitor on another port does not.
 - The `upsd.users` field must start with a `[user]` header. Otherwise its directives would join the last
   generated user. It may not redefine a generated user.
 - Custom text must be printable ASCII and must tokenise cleanly. NUT drops other bytes and rejects
@@ -64,6 +64,8 @@ conflicting, so files that set them by hand stay valid. On import, a timer line 
 old `nut3.cfg` already held that setting (the old backend rewrote the line from it); otherwise it stays a
 custom directive. The upssched directives are managed only while `ONBATTDELAY` or `EARLYSTAGE` is above 0, so
 an existing custom `upssched.conf` stays valid until one of them is turned on.
+
+In legacy full manual mode, custom scheduling directives are retained even when the old generated-file header is present. Directives that conflict with newly enabled managed timers must be resolved before applying.
 
 ## Escaping
 

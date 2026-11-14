@@ -23,15 +23,16 @@
 const NUT_CLIENT_TIMEOUT = '/usr/bin/timeout -k 2 15 ';
 /* Bound for upscmd -w, which waits for the driver to finish the command. */
 const NUT_CLIENT_TIMEOUT_WAIT = '/usr/bin/timeout -k 2 60 ';
+defined('NUT_UPSC') || define('NUT_UPSC', '/usr/bin/upsc'); // overridable so the tests can run a stand-in client
 
-/* Run upsc with the given (already escaped) arguments. Returns the exit
- * code, fills $out with the stdout lines and tells whether upsd itself
+/* Run upsc with the given (already escaped) "<ups>@<host> [variable]" arguments, after "--" because a UPS name
+ * may start with "-". Returns the exit code, fills $out with the stdout lines and tells whether upsd itself
  * could not be reached (as opposed to it answering with an error). */
 function nut_upsc($args, &$out, &$unreachable) {
     $out = [];
     $unreachable = false;
 
-    $proc = proc_open(NUT_CLIENT_TIMEOUT . '/usr/bin/upsc ' . $args, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    $proc = proc_open(NUT_CLIENT_TIMEOUT . NUT_UPSC . ' -- ' . $args, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
     if (!is_resource($proc)) {
         return 1;
     }
@@ -339,8 +340,10 @@ function nut_ups_list($gui_name, $gui_ip) {
 }
 
 /* Parse the output of `upsrw <ups>` into [name => [desc, type, value, options[], maxlen]].
- * Blocks look like "[var]", a description line, "Type: ENUM|RANGE|NUMBER|STRING", "Option: ..." lines,
- * "Maximum length: n" and "Value: v". RANGE options are "min max" or "min - max". */
+ * Blocks look like "[var]", a description line, "Type: ENUM|RANGE|NUMBER|STRING" (upsrw appends " NUMBER" or
+ * " STRING" to ENUM and RANGE), "Option: ..." lines, "Maximum length: n" and "Value: v". The value of an ENUM is its
+ * SELECTED option. A RANGE has no Value line: upsrw prints its ranges as "min-max" (also read as "min max" or
+ * "min - max") and marks the one that holds the value SELECTED, so its value stays '' until nut_upsrw_range_values(). */
 function nut_parse_upsrw($lines) {
     $vars = [];
     $cur = null;
@@ -357,7 +360,7 @@ function nut_parse_upsrw($lines) {
             $vars[$cur]['maxlen'] = (int)$m[1];
         } elseif (preg_match('/^Option: "(.*)"( SELECTED)?$/', $line, $m)) {
             $vars[$cur]['options'][] = $m[1];
-            if (!empty($m[2])) $vars[$cur]['value'] = $m[1]; // ENUM blocks have no Value line
+            if (!empty($m[2]) && $vars[$cur]['type'] === 'ENUM') $vars[$cur]['value'] = $m[1]; // ENUM blocks have no Value line; a SELECTED RANGE is not a value
         } elseif (preg_match('/^Value: ?(.*)$/', $line, $m)) {
             $vars[$cur]['value'] = $m[1];
         } elseif ($vars[$cur]['desc'] === '') {
@@ -437,7 +440,7 @@ function nut_parse_upscmd($lines) {
 /* The commands the UPS advertises; $target is already escaped. Empty on failure. */
 function nut_upscmd_list($target, $run = 'nut_run') {
     $lines = [];
-    $run(NUT_CLIENT_TIMEOUT . '/usr/bin/upscmd -l ' . $target . ' 2>/dev/null', $lines, $ret);
+    $run(NUT_CLIENT_TIMEOUT . '/usr/bin/upscmd -l -- ' . $target . ' 2>/dev/null', $lines, $ret);
     return $ret === 0 ? nut_parse_upscmd($lines) : [];
 }
 
@@ -511,7 +514,7 @@ function nut_commands_response($method, $post, $cfg, $upsList, $gui, $run) {
     if (($post['nutaction'] ?? '') === 'outlets') {
         // outlet table for the page: upsc variables plus the commands the UPS lists
         $rows = [];
-        $run(NUT_CLIENT_TIMEOUT . '/usr/bin/upsc ' . $target . ' 2>/dev/null', $rows, $ret);
+        $run(NUT_CLIENT_TIMEOUT . '/usr/bin/upsc -- ' . $target . ' 2>/dev/null', $rows, $ret);
         return ['success' => ['outlets' => nut_parse_outlets($rows, array_keys($cmds))]];
     }
     $name = $post['nutcmdname'] ?? null;
@@ -523,8 +526,22 @@ function nut_commands_response($method, $post, $cfg, $upsList, $gui, $run) {
     $wait = isset($post['nutcmdwait']);
     $out = [];
     $run(($wait ? NUT_CLIENT_TIMEOUT_WAIT : NUT_CLIENT_TIMEOUT) . '/usr/bin/upscmd -u ' . escapeshellarg($cred[0]) . ' -p ' . escapeshellarg($cred[1])
-        . ($wait ? ' -w ' : ' ') . $target . ' ' . escapeshellarg($name) . ($arg !== '' ? ' ' . escapeshellarg($arg) : '') . ' 2>&1', $out, $ret);
+        . ($wait ? ' -w' : '') . ' -- ' . $target . ' ' . escapeshellarg($name) . ($arg !== '' ? ' ' . escapeshellarg($arg) : '') . ' 2>&1', $out, $ret);
     return nut_command_result($out, $ret, $cred[1]);
+}
+
+/* Fills in the current value of the RANGE variables of an nut_parse_upsrw() result: upsrw does not print it, upsc does.
+ * One upsc call for all of them, and none while there is no RANGE. $target is already escaped. */
+function nut_upsrw_range_values(&$vars, $target, $run) {
+    $ranges = array_filter($vars, fn($v) => $v['type'] === 'RANGE');
+    if (!$ranges) return;
+    $rows = [];
+    $run(NUT_CLIENT_TIMEOUT . '/usr/bin/upsc -- ' . $target . ' 2>/dev/null', $rows, $ret);
+    if ($ret !== 0) return;
+    foreach ($rows as $row) {
+        $p = explode(':', $row, 2);
+        if (count($p) == 2 && isset($ranges[trim($p[0])])) $vars[trim($p[0])]['value'] = trim($p[1]);
+    }
 }
 
 /* action=list: the writable variables of the UPS.
@@ -539,10 +556,13 @@ function nut_upsrw_response($method, $post, $cfg, $upsList, $gui, $run) {
 
     $target = escapeshellarg($ups) . '@' . escapeshellarg($upsList[$ups]);
     $out = [];
-    $run(NUT_CLIENT_TIMEOUT . "/usr/bin/upsrw $target 2>&1", $out, $ret);
+    $run(NUT_CLIENT_TIMEOUT . "/usr/bin/upsrw -- $target 2>&1", $out, $ret);
     if ($ret !== 0) return nut_error_response(htmlspecialchars(implode(PHP_EOL, $out)));
     $vars = nut_parse_upsrw($out);
-    if ($action === 'list') return ['success' => ['vars' => $vars]];
+    if ($action === 'list') {
+        nut_upsrw_range_values($vars, $target, $run);
+        return ['success' => ['vars' => $vars]];
+    }
 
     $name = $post['nutvar'] ?? '';
     $value = $post['nutvalue'] ?? '';
@@ -552,7 +572,7 @@ function nut_upsrw_response($method, $post, $cfg, $upsList, $gui, $run) {
     if (($check = nut_check_upsrw_value($vars[$name], $value)) !== null) return nut_error_response(htmlspecialchars($check));
 
     $out = [];
-    $run(NUT_CLIENT_TIMEOUT . '/usr/bin/upsrw -s ' . escapeshellarg("$name=$value") . ' -u ' . escapeshellarg($cred[0]) . ' -p ' . escapeshellarg($cred[1]) . ' ' . $target . ' 2>&1', $out, $ret);
+    $run(NUT_CLIENT_TIMEOUT . '/usr/bin/upsrw -s ' . escapeshellarg("$name=$value") . ' -u ' . escapeshellarg($cred[0]) . ' -p ' . escapeshellarg($cred[1]) . ' -- ' . $target . ' 2>&1', $out, $ret);
     return nut_command_result($out, $ret, $cred[1]);
 }
 ?>

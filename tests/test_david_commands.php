@@ -11,6 +11,34 @@ $cacheDir = sys_get_temp_dir() . '/nut-rows-' . bin2hex(random_bytes(12));
 if (!mkdir($cacheDir, 0700)) throw new RuntimeException('Cannot create test sandbox');
 define('NUT_ROWS_CACHE_DIR', $cacheDir);
 
+// a stand-in for upsc in a directory of its own (the cache directory is emptied by the tests below). Like the real
+// client's getopt it takes a leading "-name" for an option unless "--" ends the options first.
+$binDir = sys_get_temp_dir() . '/nut-bin-' . bin2hex(random_bytes(12));
+if (!mkdir($binDir, 0700)) throw new RuntimeException('Cannot create test sandbox');
+define('NUT_UPSC', "$binDir/upsc");
+file_put_contents(NUT_UPSC, <<<'SH'
+#!/bin/bash
+dir=$(dirname "$0")
+echo "$*" >> "$dir/upsc.log"
+if [ "$1" = -- ]; then
+    shift
+elif [[ "$1" == -* ]]; then
+    echo "Error: invalid option -- '$1'" >&2
+    exit 1
+fi
+if [ -n "$2" ]; then # upsc <ups> <variable>
+    case "$2" in
+        ups.status) echo OL ;;
+        battery.charge) echo 88 ;;
+        *) echo "Error: Variable not supported by UPS" >&2; exit 1 ;;
+    esac
+    exit 0
+fi
+[ -e "$dir/listall" ] || { echo "Error: Protocol error" >&2; exit 1; }
+printf '%s\n' 'ups.status: OL' 'battery.charge: 88'
+SH);
+chmod(NUT_UPSC, 0700);
+
 require_once __DIR__ . '/../source/nut3/usr/local/emhttp/plugins/nut3/include/nut_helpers.php';
 
 $failures = 0;
@@ -68,22 +96,24 @@ $upsrwLines = [
     '',
     '[battery.charge.low]',
     'Low battery threshold',
-    'Type: RANGE',
-    'Option: "10 - 50"',
-    'Value: 20',
+    'Type: RANGE NUMBER',
+    'Option: "10-50" SELECTED',
+    '',
     '[input.transfer.low]',
     'Low transfer point',
-    'Type: RANGE',
-    'Option: "-5 - 5"',
-    'Option: "100 120"',
-    'Value: 0',
+    'Type: RANGE NUMBER',
+    'Option: "-5-5" SELECTED',
+    'Option: "100-120"',
 ];
 $vars = nut_parse_upsrw($upsrwLines);
 check(array_keys($vars) === ['ups.delay.shutdown', 'ups.beeper.status', 'ups.id', 'battery.charge.low', 'input.transfer.low'], 'upsrw variables parsed in order');
 check($vars['ups.delay.shutdown']['type'] === 'NUMBER' && $vars['ups.delay.shutdown']['value'] === '20' && $vars['ups.delay.shutdown']['desc'] === 'Interval to wait after shutdown with delay command (seconds)', 'NUMBER variable');
 check($vars['ups.beeper.status']['options'] === ['disabled', 'enabled', 'muted'] && $vars['ups.beeper.status']['value'] === 'enabled', 'ENUM options and the SELECTED value');
 check($vars['ups.id']['maxlen'] === 10 && $vars['ups.id']['value'] === 'UPS1', 'STRING maximum length and value');
-check($vars['battery.charge.low']['options'] === ['10 - 50'], 'RANGE option kept verbatim');
+check($vars['battery.charge.low']['type'] === 'RANGE' && $vars['battery.charge.low']['options'] === ['10-50'], 'RANGE: "RANGE NUMBER" is a RANGE, the option is kept verbatim');
+check($vars['battery.charge.low']['value'] === '' && $vars['input.transfer.low']['value'] === '', 'RANGE: the SELECTED range is not the value (upsrw prints none)');
+check(nut_parse_upsrw(['[x]', 'Type: ENUM NUMBER', 'Option: "1"', 'Option: "2" SELECTED'])['x']['value'] === '2', 'ENUM NUMBER: the SELECTED option is the value');
+check(nut_check_upsrw_value(['type' => 'RANGE', 'options' => ['10 - 50', '100 120'], 'maxlen' => null], '110') === null, 'RANGE: the "min - max" and "min max" spellings are still read');
 check(nut_parse_upsrw(['Error: Variable not supported', 'Value: 1']) === [], 'text before the first [variable] block is ignored');
 
 // --- upsrw: a value is only accepted if the variable's own definition allows it -----------------------------------
@@ -198,14 +228,14 @@ check(nut_admin_credentials(['ADMINUSER' => 'upsadmin', 'ADMINPASS' => '!!not ba
 check(nut_admin_credentials(['ADMINUSER' => 'upsadmin']) === null && nut_admin_credentials([]) === null && nut_admin_credentials(false) === null, 'credentials: missing settings, none');
 
 // --- the endpoints, against a fake command runner -------------------------------------------------------------------
-$upsList = ['ups' => '127.0.0.1', 'second' => '192.0.2.5'];
+$upsList = ['ups' => '127.0.0.1', 'second' => '192.0.2.5', '-dash' => '198.51.100.9'];
 $upscmdList = [
     'ups' => ['Instant commands supported on UPS [ups]:', '', 'beeper.disable - Disable the UPS beeper', 'outlet.1.load.off - Switch outlet 1 off', 'outlet.1.load.on - Switch outlet 1 on'],
     'second' => ['Instant commands supported on UPS [second]:', '', 'load.on - Turn on the load'],
 ];
 
 /* Answers the NUT clients like a UPS would and logs every command line. $opts: out/ret = result of upscmd and
- * upsrw -s, listout/listret = result of upsrw (list). */
+ * upsrw -s, listout/listret = result of upsrw (list), rowsout/rowsret = result of upsc. */
 function fake_runner(array &$log, array $opts) {
     global $upscmdList, $upsrwLines;
     return function ($cmd, &$out, &$ret) use (&$log, $opts, $upscmdList, $upsrwLines) {
@@ -215,7 +245,8 @@ function fake_runner(array &$log, array $opts) {
         if (strpos($cmd, '/usr/bin/upscmd -l ') !== false) {
             $out = strpos($cmd, "'second'@") !== false ? $upscmdList['second'] : $upscmdList['ups'];
         } elseif (strpos($cmd, '/usr/bin/upsc ') !== false) {
-            $out = ['battery.charge: 100', 'outlet.1.desc: Server', 'outlet.1.status: on'];
+            $out = $opts['rowsout'] ?? ['battery.charge: 100', 'battery.charge.low: 20', 'input.transfer.low: 0', 'outlet.1.desc: Server', 'outlet.1.status: on'];
+            $ret = $opts['rowsret'] ?? 0;
         } elseif (strpos($cmd, '/usr/bin/upsrw -s ') !== false || strpos($cmd, '/usr/bin/upscmd -u ') !== false) {
             $out = $opts['out'] ?? ['OK'];
             $ret = $opts['ret'] ?? 0;
@@ -260,10 +291,10 @@ foreach (['nut_commands_response' => ['nutaction' => 'outlets'], 'nut_upsrw_resp
 }
 
 // commands: only what the UPS lists, as the stored NUT Admin user
-$expected = NUT_CLIENT_TIMEOUT . "/usr/bin/upscmd -u 'upsadmin' -p 'Adm1nPass' 'ups'@'127.0.0.1' 'beeper.disable' 2>&1";
+$expected = NUT_CLIENT_TIMEOUT . "/usr/bin/upscmd -u 'upsadmin' -p 'Adm1nPass' -- 'ups'@'127.0.0.1' 'beeper.disable' 2>&1";
 [$r, $log, $with] = call('nut_commands_response', ['nutcmdname' => 'beeper.disable']);
 check($with === [$expected] && $r === ['success' => ['response' => 'OK']], 'commands: a listed command runs once, bounded, with the stored credentials');
-check($log[0] === NUT_CLIENT_TIMEOUT . "/usr/bin/upscmd -l 'ups'@'127.0.0.1' 2>/dev/null", 'commands: the UPS is asked for its command list first, bounded');
+check($log[0] === NUT_CLIENT_TIMEOUT . "/usr/bin/upscmd -l -- 'ups'@'127.0.0.1' 2>/dev/null", 'commands: the UPS is asked for its command list first, bounded');
 
 [$r, , $with] = call('nut_commands_response', ['nutcmdname' => 'beeper.disable'] + $browserCreds);
 check($with === [$expected], 'commands: credentials sent by the browser are ignored');
@@ -275,7 +306,7 @@ foreach (['shutdown.return', 'beeper.disable; id', "beeper.disable\nid", '', ['b
 [$r, , $with] = call('nut_commands_response', ['nutcmdname' => 'beeper.disable', 'nutups' => 'second']);
 check(error_of($r) === 'Command is not listed by the UPS.' && $with === [], 'commands: a command only another UPS lists is not run');
 [$r, , $with] = call('nut_commands_response', ['nutcmdname' => 'load.on', 'nutups' => 'second']);
-check($with === [NUT_CLIENT_TIMEOUT . "/usr/bin/upscmd -u 'upsadmin' -p 'Adm1nPass' 'second'@'192.0.2.5' 'load.on' 2>&1"], 'commands: a second UPS is validated against its own list and addressed by its host');
+check($with === [NUT_CLIENT_TIMEOUT . "/usr/bin/upscmd -u 'upsadmin' -p 'Adm1nPass' -- 'second'@'192.0.2.5' 'load.on' 2>&1"], 'commands: a second UPS is validated against its own list and addressed by its host');
 
 [$r, , $with] = call('nut_commands_response', []);
 check(error_of($r) === 'Missing required POST variables!' && $with === [], 'commands: no command name');
@@ -288,7 +319,7 @@ foreach ($noCreds as $over) {
 }
 
 [, , $with] = call('nut_commands_response', ['nutcmdname' => 'beeper.disable', 'nutcmdwait' => 'on', 'nutcmdarg' => '5']);
-check($with === [NUT_CLIENT_TIMEOUT_WAIT . "/usr/bin/upscmd -u 'upsadmin' -p 'Adm1nPass' -w 'ups'@'127.0.0.1' 'beeper.disable' '5' 2>&1"], 'commands: waiting for the driver gets its own, longer bound; the argument is passed');
+check($with === [NUT_CLIENT_TIMEOUT_WAIT . "/usr/bin/upscmd -u 'upsadmin' -p 'Adm1nPass' -w -- 'ups'@'127.0.0.1' 'beeper.disable' '5' 2>&1"], 'commands: waiting for the driver gets its own, longer bound; the argument is passed');
 [, , $with] = call('nut_commands_response', ['nutcmdname' => 'beeper.disable', 'nutcmdarg' => '0']);
 check($with === [str_replace("'beeper.disable'", "'beeper.disable' '0'", $expected)], 'commands: an argument of 0 is passed');
 [, , $with] = call('nut_commands_response', ['nutcmdname' => 'beeper.disable', 'nutcmdarg' => '$(id); `id` \'x\'']);
@@ -304,11 +335,11 @@ check($r === ['success' => ['response' => 'line 1' . PHP_EOL . 'line &lt;2&gt;']
 // outlets: the table is readable without credentials, switching is not
 foreach ($noCreds as $over) {
     [$r, $log, $with] = call('nut_commands_response', ['nutaction' => 'outlets'], $over);
-    check($with === [] && in_array(NUT_CLIENT_TIMEOUT . "/usr/bin/upsc 'ups'@'127.0.0.1' 2>/dev/null", $log, true), 'outlets: listed with a bounded upsc call, no credentials used (' . json_encode($over) . ')');
+    check($with === [] && in_array(NUT_CLIENT_TIMEOUT . "/usr/bin/upsc -- 'ups'@'127.0.0.1' 2>/dev/null", $log, true), 'outlets: listed with a bounded upsc call, no credentials used (' . json_encode($over) . ')');
     check(array_keys($r['success']['outlets'] ?? []) === [1] && $r['success']['outlets'][1]['desc'] === 'Server' && $r['success']['outlets'][1]['cmds'] === ['off' => 'outlet.1.load.off', 'on' => 'outlet.1.load.on'], 'outlets: variables and the commands the UPS lists');
 }
 [$r, , $with] = call('nut_commands_response', ['nutcmdname' => 'outlet.1.load.off']);
-check($with === [NUT_CLIENT_TIMEOUT . "/usr/bin/upscmd -u 'upsadmin' -p 'Adm1nPass' 'ups'@'127.0.0.1' 'outlet.1.load.off' 2>&1"], 'outlets: switching goes through the same checked command path');
+check($with === [NUT_CLIENT_TIMEOUT . "/usr/bin/upscmd -u 'upsadmin' -p 'Adm1nPass' -- 'ups'@'127.0.0.1' 'outlet.1.load.off' 2>&1"], 'outlets: switching goes through the same checked command path');
 
 // writable variables
 $setPost = ['action' => 'set', 'nutvar' => 'battery.charge.low', 'nutvalue' => '30'];
@@ -320,7 +351,18 @@ foreach ($noCreds as $over) {
     check(strpos(implode("\n", $log), 'hunter2') === false, 'upsrw: browser-sent passwords never reach a command line');
 }
 [$r, $log] = call('nut_upsrw_response', ['action' => 'list']);
-check($log === [NUT_CLIENT_TIMEOUT . "/usr/bin/upsrw 'ups'@'127.0.0.1' 2>&1"], 'upsrw: listing is one bounded call');
+check($log === [NUT_CLIENT_TIMEOUT . "/usr/bin/upsrw -- 'ups'@'127.0.0.1' 2>&1", NUT_CLIENT_TIMEOUT . "/usr/bin/upsc -- 'ups'@'127.0.0.1' 2>/dev/null"], 'upsrw: listing is one bounded upsrw call and one bounded upsc call for the RANGE values');
+$listed = $r['success']['vars'];
+check($listed['battery.charge.low']['value'] === '20' && $listed['input.transfer.low']['value'] === '0', 'upsrw: a RANGE shows its current value from upsc, not its SELECTED range');
+check($listed['ups.beeper.status']['value'] === 'enabled' && $listed['ups.delay.shutdown']['value'] === '20' && $listed['ups.id']['value'] === 'UPS1', 'upsrw: ENUM, NUMBER and STRING keep the value upsrw printed');
+[$r] = call('nut_upsrw_response', ['action' => 'list'], [], ['rowsout' => ['battery.charge.low: 35', 'ups.delay.shutdown: 77', 'ups.id: other']]);
+$listed = $r['success']['vars'];
+check($listed['battery.charge.low']['value'] === '35' && $listed['input.transfer.low']['value'] === '', 'upsrw: the RANGE value is upsc\'s live one, a RANGE upsc does not report stays empty');
+check($listed['ups.delay.shutdown']['value'] === '20' && $listed['ups.id']['value'] === 'UPS1', 'upsrw: only RANGE variables take their value from upsc');
+[$r] = call('nut_upsrw_response', ['action' => 'list'], [], ['rowsret' => 1, 'rowsout' => ['battery.charge.low: 35']]);
+check(!isset($r['error']) && $r['success']['vars']['battery.charge.low']['value'] === '' && $r['success']['vars']['ups.id']['value'] === 'UPS1', 'upsrw: if upsc fails the listing still works and a RANGE value stays empty, never its SELECTED range');
+[$r, $log] = call('nut_upsrw_response', ['action' => 'list'], [], ['listout' => array_slice($upsrwLines, 0, array_search('[battery.charge.low]', $upsrwLines))]);
+check(count($log) === 1 && array_keys($r['success']['vars']) === ['ups.delay.shutdown', 'ups.beeper.status', 'ups.id'], 'upsrw: without a RANGE variable upsc is not called');
 [$r] = call('nut_upsrw_response', ['action' => 'list'], [], ['listret' => 1, 'listout' => ['Error: <x>']]);
 check($r === ['error' => ['response' => 'Error: &lt;x&gt;']], 'upsrw: a failing listing is an escaped error');
 foreach ([[], ['action' => 'delete'], ['action' => ['set']]] as $post) {
@@ -328,9 +370,10 @@ foreach ([[], ['action' => 'delete'], ['action' => ['set']]] as $post) {
     check(error_of($r) === 'Missing required POST variables!' && $log === [], 'upsrw: ' . json_encode($post) . ' is not an action');
 }
 
-$expected = NUT_CLIENT_TIMEOUT . "/usr/bin/upsrw -s 'battery.charge.low=30' -u 'upsadmin' -p 'Adm1nPass' 'ups'@'127.0.0.1' 2>&1";
-[$r, , $with] = call('nut_upsrw_response', $setPost + $browserCreds);
+$expected = NUT_CLIENT_TIMEOUT . "/usr/bin/upsrw -s 'battery.charge.low=30' -u 'upsadmin' -p 'Adm1nPass' -- 'ups'@'127.0.0.1' 2>&1";
+[$r, $log, $with] = call('nut_upsrw_response', $setPost + $browserCreds);
 check($with === [$expected] && $r === ['success' => ['response' => 'OK']], 'upsrw: a valid value is set once, bounded, with the stored credentials, not the browser\'s');
+check(count($log) === 2 && strpos($log[0], '/usr/bin/upsrw -- ') !== false, 'upsrw: a set reads the variable definitions once and fetches no RANGE value');
 [, , $with] = call('nut_upsrw_response', ['nutups' => 'second'] + $setPost);
 check($with === [str_replace(["'ups'@'127.0.0.1'"], ["'second'@'192.0.2.5'"], $expected)], 'upsrw: a second UPS is addressed by its host');
 
@@ -363,8 +406,36 @@ check($with === [str_replace(["'battery.charge.low=30'"], [escapeshellarg("ups.i
 [$r] = call('nut_upsrw_response', $setPost, [], ['ret' => 1, 'out' => ['upsrw: bad login Adm1nPass <now>']]);
 check($r === ['error' => ['response' => 'upsrw: bad login *** &lt;now&gt;']], 'upsrw: a failure is an escaped error with the password masked');
 
+// a UPS name may start with "-": every client call ends its option parsing before the target
+$dash = escapeshellarg('-dash') . '@' . escapeshellarg('198.51.100.9');
+$dashList = NUT_CLIENT_TIMEOUT . "/usr/bin/upscmd -l -- $dash 2>/dev/null";
+[$r, $log] = call('nut_commands_response', ['nutups' => '-dash', 'nutcmdname' => 'beeper.disable', 'nutcmdwait' => 'on', 'nutcmdarg' => '-5']);
+check(!isset($r['error']) && $log === [$dashList, NUT_CLIENT_TIMEOUT_WAIT . "/usr/bin/upscmd -u 'upsadmin' -p 'Adm1nPass' -w -- $dash 'beeper.disable' '-5' 2>&1"], 'dash UPS: upscmd -l and upscmd -w end the options before the target, an argument may start with "-"');
+[$r, $log] = call('nut_commands_response', ['nutups' => '-dash', 'nutaction' => 'outlets']);
+check(!isset($r['error']) && $log === [$dashList, NUT_CLIENT_TIMEOUT . "/usr/bin/upsc -- $dash 2>/dev/null"], 'dash UPS: the outlet table\'s upsc ends the options before the target');
+[$r, $log] = call('nut_upsrw_response', ['nutups' => '-dash', 'action' => 'list']);
+check(!isset($r['error']) && $log === [NUT_CLIENT_TIMEOUT . "/usr/bin/upsrw -- $dash 2>&1", NUT_CLIENT_TIMEOUT . "/usr/bin/upsc -- $dash 2>/dev/null"], 'dash UPS: upsrw and the RANGE value upsc end the options before the target');
+[$r, $log] = call('nut_upsrw_response', ['nutups' => '-dash'] + $setPost);
+check(!isset($r['error']) && $log === [NUT_CLIENT_TIMEOUT . "/usr/bin/upsrw -- $dash 2>&1", NUT_CLIENT_TIMEOUT . "/usr/bin/upsrw -s 'battery.charge.low=30' -u 'upsadmin' -p 'Adm1nPass' -- $dash 2>&1"], 'dash UPS: upsrw -s ends the options before the target');
+
+// the status read runs the real upsc code path against the stand-in client (the clients above run through the fake runner)
+exec(escapeshellarg(NUT_UPSC) . ' ' . escapeshellarg('-dash@127.0.0.1') . ' 2>&1', $unused, $code);
+check($code !== 0, 'the stand-in upsc takes a leading "-name" for an option, like the real client');
+$upscLog = "$binDir/upsc.log";
+@unlink($upscLog);
+touch("$binDir/listall");
+check(nut_status_rows_uncached('-dash', '127.0.0.1') === ['ups.status: OL', 'battery.charge: 88'], 'dash UPS: upsc lists the variables of a UPS named "-dash"');
+check(file($upscLog, FILE_IGNORE_NEW_LINES) === ['-- -dash@127.0.0.1'], 'dash UPS: the listing is one upsc call with "--" before the target');
+unlink("$binDir/listall");
+@unlink($upscLog);
+check(nut_status_rows_uncached('-dash', '127.0.0.1') === ['battery.charge: 88', 'ups.status: OL', 'x.plugin.varfetch: fallback'], 'dash UPS: the one-by-one fallback reads a UPS named "-dash"');
+$calls = file($upscLog, FILE_IGNORE_NEW_LINES);
+check(count($calls) > 2 && count(preg_grep('/^-- -dash@127\.0\.0\.1( [a-z.]+)?$/', $calls)) === count($calls), 'dash UPS: every fallback upsc call has "--" before the target');
+
 clear_dir($cacheDir);
 rmdir($cacheDir);
+clear_dir($binDir);
+rmdir($binDir);
 
 if ($failures) {
     fwrite(STDERR, "$failures check(s) failed.\n");

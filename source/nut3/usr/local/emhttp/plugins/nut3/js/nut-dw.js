@@ -21,9 +21,10 @@
         return true;
     };
 
+    /* the skip armed a timer: disarm it, or it fires a second poll while the resumed one is still in flight */
     document.addEventListener('visibilitychange', function () {
         if (document.hidden) return;
-        Object.keys(skipped).forEach(function (n) { delete skipped[n]; pollers[n](); });
+        Object.keys(skipped).forEach(function (n) { delete skipped[n]; clearTimeout(window.timers[n]); pollers[n](); });
     });
 
     function setIcon($i, cls, title) {
@@ -52,15 +53,17 @@
             var bc = $r.find('.nut_bcharge').text(), cc = d[1].includes('red-text') ? 'red-text' : d[1].includes('orange-text') ? 'orange-text' : d[1].includes('green-text') ? 'green-text' : 'black-text';
             $('.nutdcc').attr('class', 'nutdcc ' + cc).text(bc || '-');
 
+            /* class in the dashboard tiles, id in the legacy (Unraid before 6.12) tile */
+            var $alarms = $('.nutalarms, #nutalarms');
             if (data.success.alarms) {
-                $('.nutalarms').html("<i class='red-text fa fa-bell faa-ring animated'></i><span class='nut-sr'>UPS alarm active</span> ")
+                $alarms.html("<i class='red-text fa fa-bell faa-ring animated'></i><span class='nut-sr'>UPS alarm active</span> ")
                     .attr('title', '<b>NUT Active UPS Alarm(s):</b><br>- ' + data.success.alarms.join('<br>- ')).show();
             } else {
-                $('.nutalarms').html('').attr('title', '').hide();
+                $alarms.html('').attr('title', '').hide();
             }
             if (typeof $.fn.tooltipster === 'function') {
                 $('.nutdsicon').tooltipster();
-                $('.nutalarms').tooltipster({ contentAsHTML: true });
+                $alarms.tooltipster({ contentAsHTML: true });
             }
         } else {
             var err = "<i class='red-text fa fa-times-circle'></i> <em>Error (check logs)</em>";
@@ -68,6 +71,9 @@
             $('.nutdcc').html("<i class='red-text fa fa-times-circle'></i>");
             $r.find('.nut_status, .nut_bcharge, .nut_timeleft, .nut_nompower').html(err);
             $r.find('.nut_loadpct').html("<i class='red-text fa fa-times-circle'></i>");
+            // nothing from the last good answer may stay on show: secondary UPSes and the alarm bell
+            $r.find('.nut_others').empty().hide();
+            $('.nutalarms, #nutalarms').html('').attr('title', '').hide();
         }
     };
 })();

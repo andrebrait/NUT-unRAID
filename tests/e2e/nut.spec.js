@@ -234,7 +234,7 @@ test.describe('NUT Commands', () => {
     await quickTest.locator('.nutcmdconfirmbox').check();
     await quickTest.locator('.nutcmdbutton').click();
     await expect(page.locator('.sweet-alert')).toContainText('The backend driver has responded with the following message');
-    expect(root.read(`${FIXTURES}/upscmd.log`)).toContain('-u upsadmin -p Adm1nPass ups@127.0.0.1 test.battery.start.quick\n');
+    expect(root.read(`${FIXTURES}/upscmd.log`)).toContain('-u upsadmin -p Adm1nPass -- ups@127.0.0.1 test.battery.start.quick\n');
     expect(await page.content()).not.toContain('Adm1nPass');
   });
 

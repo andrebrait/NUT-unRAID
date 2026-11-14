@@ -24,18 +24,18 @@
 // overridable so the tests can run against a stub instead of the real upsc
 defined('NUT_TEST_UPSC') || define('NUT_TEST_UPSC', 'timeout 5 /usr/bin/upsc ');
 
-/* hostname / IPv4, or bracketed IPv6, each with optional :port. These are the forms the settings accept for the
- * NUT master (bare IPv6 cannot be told from host:port, so it is not accepted there either). */
+/* hostname (with the optional trailing dot of a fully qualified name) / IPv4, or bracketed IPv6, each with optional
+ * :port. These are the forms the settings accept for the NUT master (bare IPv6 cannot be told from host:port, so it is not accepted there either). */
 function nut_testconn_valid_host($h) {
     $label = '[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?';
     $port  = '(?::[0-9]{1,5})?';
-    $re = "/^(?:$label(?:\\.$label)*|\\[[0-9A-Fa-f:.]+\\])$port$/D";
+    $re = "/^(?:$label(?:\\.$label)*\\.?|\\[[0-9A-Fa-f:.]+\\])$port$/D";
     return is_string($h) && strlen($h) <= 255 && preg_match($re, $h) === 1;
 }
 
-/* no leading "-", so "name@host" can never be taken for an option */
+/* the characters the settings accept for a UPS name; a leading "-" is fine, the upsc calls below end their options first */
 function nut_testconn_valid_name($n) {
-    return is_string($n) && strlen($n) <= 64 && preg_match('/^[A-Za-z0-9._][A-Za-z0-9._-]*$/D', $n) === 1;
+    return is_string($n) && preg_match('/^[A-Za-z0-9._-]{1,64}$/D', $n) === 1;
 }
 
 /* run a command string (arguments already escaped); returns [exit code, stdout lines, stderr text] */
@@ -55,7 +55,7 @@ function nut_testconn($host, $name) {
     if (!nut_testconn_valid_host($host)) { $res['lines'][] = ['fail', 'Invalid host: use a hostname, IPv4 or IPv6 address (optionally with :port).']; return $res; }
     if (!nut_testconn_valid_name($name)) { $res['lines'][] = ['fail', 'Invalid UPS name: use only letters, digits, dot, underscore and dash.']; return $res; }
 
-    [$code, $list, $err] = nut_testconn_run(NUT_TEST_UPSC . '-l ' . escapeshellarg($host));
+    [$code, $list, $err] = nut_testconn_run(NUT_TEST_UPSC . '-l -- ' . escapeshellarg($host));
     if ($code === 124) { $res['lines'][] = ['fail', "No response from $host within 5 seconds."]; return $res; }
     if ($code !== 0) { $res['lines'][] = ['fail', "Could not reach the NUT server at $host" . ($err !== '' ? ": $err" : '.')]; return $res; }
     $res['lines'][] = ['ok', "NUT server at $host is reachable."];
@@ -68,7 +68,7 @@ function nut_testconn($host, $name) {
     }
     $res['lines'][] = ['ok', "UPS \"$name\" exists."];
 
-    [$code, $st, $err] = nut_testconn_run(NUT_TEST_UPSC . escapeshellarg($name . '@' . $host) . ' ups.status');
+    [$code, $st, $err] = nut_testconn_run(NUT_TEST_UPSC . '-- ' . escapeshellarg($name . '@' . $host) . ' ups.status');
     if ($code === 0 && $st) {
         $res['ok'] = true;
         $res['lines'][] = ['ok', 'Status: ' . $st[0]];

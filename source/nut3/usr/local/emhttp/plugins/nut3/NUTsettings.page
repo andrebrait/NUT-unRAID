@@ -1213,7 +1213,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
         <dl>
             <dt><label for="POWERW">UPS Nominal Watt Capacity (W):</label></dt>
             <dd>
-                <input id="POWERW" type="number" class="narrow" name="POWERW" value="<?=$nut_powerw?>" min="-1" max="1000000" step="1" required data-err="Enter a whole number from -1 to 1000000.">
+                <input id="POWERW" type="number" class="narrow" name="POWERW" value="<?=$nut_powerw?>" min="-1000000" max="1000000" step="1" required data-err="Enter a whole number from -1000000 to 1000000.">
             </dd>
         </dl>
 
@@ -1230,7 +1230,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
         <dl>
             <dt><label for="POWERVA">UPS Nominal Volt Ampere Capacity (VA):</label></dt>
             <dd>
-                <input id="POWERVA" type="number" class="narrow" name="POWERVA" value="<?=$nut_powerva?>" min="-1" max="1000000" step="1" required data-err="Enter a whole number from -1 to 1000000.">
+                <input id="POWERVA" type="number" class="narrow" name="POWERVA" value="<?=$nut_powerva?>" min="-1000000" max="1000000" step="1" required data-err="Enter a whole number from -1000000 to 1000000.">
             </dd>
         </dl>
 

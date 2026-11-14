@@ -88,6 +88,19 @@ check(has(nut_mc_validate(array_merge($multi, ['CUSTOM_UPSMON' => $b("MONITOR up
 check(nut_mc_local_ups('spare@127.0.0.1') === 'spare' && nut_mc_local_ups('spare@localhost:3493') === 'spare' && nut_mc_local_ups('spare@[::1]') === 'spare'
     && nut_mc_local_ups('spare@10.0.0.2') === null && nut_mc_local_ups('spare') === null, 'only this machine\'s UPSes count as local');
 
+// a loopback system on another port is another server's: the local UPS is still watched on the default port
+check(nut_mc_local_ups('spare@127.0.0.1:3494') === null && nut_mc_local_ups('spare@localhost:3494') === null && nut_mc_local_ups('spare@[::1]:3494') === null
+    && nut_mc_local_ups('spare@127.0.0.1:3493') === 'spare' && nut_mc_local_ups('spare@[::1]:3493') === 'spare', 'only the default port is this machine\'s upsd');
+check(nut_mc_local_ups('spare@127.0.0.1:3494', true) === 'spare' && nut_mc_local_ups('spare@10.0.0.2:3493', true) === null, 'any port counts as local when asked, other hosts never');
+check(nut_mc_local_ups('spare@::1:3493', true) === null && nut_mc_local_ups('spare@[::1', true) === null && nut_mc_local_ups('spare@::1]', true) === null, 'a malformed loopback address is not one');
+$elsewhere = array_merge($multi, ['CUSTOM_UPSMON' => $b("MONITOR spare@127.0.0.1:3494 1 monuser pass master\n")]);
+check(nut_mc_validate($elsewhere) === [], 'a custom MONITOR line on another port is valid: ' . implode(' | ', nut_mc_validate($elsewhere)));
+check(monitors(nut_mc_generate($elsewhere)['upsmon.conf']) === ['ups@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['0', 'slave'], 'third@127.0.0.1' => ['0', 'slave'],
+    'spare@127.0.0.1:3494' => ['1', 'master']], 'a custom MONITOR line on another port does not replace the generated one');
+$default = array_merge($multi, ['CUSTOM_UPSMON' => $b("MONITOR spare@LOCALHOST:3493 1 monuser pass master\n")]);
+check(monitors(nut_mc_generate($default)['upsmon.conf']) === ['ups@127.0.0.1' => ['1', 'master'], 'third@127.0.0.1' => ['0', 'slave'], 'spare@LOCALHOST:3493' => ['1', 'master']],
+    'a custom MONITOR line on the default port replaces the generated one');
+
 // ---- validation -------------------------------------------------------------------------------------------------
 $errors = fn($custom, array $more = []) => nut_mc_validate(array_merge($defaults, ['CUSTOM_UPS' => $b($custom)], $more));
 check($errors($spare) === [], 'one additional section is valid');
@@ -133,6 +146,28 @@ check(monitors($out['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 's
 check(has($notes, '[spare] is now only watched') && nut_mc_validate($c) === [], 'an unmonitored section is reported as watched only');
 check(monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['0', 'slave']], 'an unmonitored section is generated with power value 0');
 
+// a MONITOR line of another UPS on another port is kept as it is, and that UPS is still watched on the default port
+[$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], [
+    'ups.conf' => $legacyUps,
+    'upsmon.conf' => "MONITOR rack@127.0.0.1 1 monuser pass master\nMONITOR spare@127.0.0.1:3494 1 observer obspass slave\n",
+]);
+check($c['MONUSER'] === 'monuser' && nut_mc_decode($c['CUSTOM_UPSMON']) === 'MONITOR spare@127.0.0.1:3494 1 observer obspass slave',
+    'the MONITOR line on another port stays a custom directive, credentials included');
+check(has($notes, '[spare] is now only watched') && has($notes, 'power value 1') && nut_mc_validate($c) === [], 'the import reports the generated watch line and the kept power value: ' . implode(' | ', $notes));
+check(monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['0', 'slave'], 'spare@127.0.0.1:3494' => ['1', 'slave']],
+    'the UPS is watched on the default port next to the kept line');
+// the same line on the default port replaces the generated one
+[$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], [
+    'ups.conf' => $legacyUps,
+    'upsmon.conf' => "MONITOR rack@127.0.0.1 1 monuser pass master\nMONITOR spare@localhost:3493 0 observer obspass slave\n",
+]);
+check(!has($notes, 'only watched') && monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@localhost:3493' => ['0', 'slave']],
+    'a MONITOR line on the default port is not generated twice');
+// alone, the other port's line must not turn into the shutdown UPS's monitor account
+[$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], ['ups.conf' => $legacyUps, 'upsmon.conf' => "MONITOR spare@127.0.0.1:3494 0 observer obspass slave\n"]);
+check($c['MONUSER'] === 'monuser' && has($notes, 'no MONITOR line was found') && nut_mc_decode($c['CUSTOM_UPSMON']) === 'MONITOR spare@127.0.0.1:3494 0 observer obspass slave',
+    'the other port\'s MONITOR line does not replace the shutdown UPS\'s monitor account');
+
 // the settings name no section: the first section takes over and the import says so
 [$c, $notes] = nut_mc_import(['MANUAL' => 'enable'], ['ups.conf' => "[a]\ndriver = nutdrv_qx\nport = auto\n[b]\ndriver = nutdrv_qx\nport = auto\n"]);
 check($c['NAME'] === 'a' && has($notes, 'has no section') && has($notes, '[b]'), 'a settings name without a section is reported when the first section takes over: ' . implode(' | ', $notes));
@@ -168,8 +203,8 @@ check(has($msgs, 'additional UPS sections') && nut_mc_validate($c) === [], 'the 
 check(nut_mc_decode($c['CUSTOM_UPS']) === trim($spare), 'a scan without extra details still keeps the additional sections');
 
 // ---- deployment -------------------------------------------------------------------------------------------------
-$dir = sys_get_temp_dir() . '/nut-multi-' . getmypid();
-@mkdir($dir, 0777, true);
+$dir = sys_get_temp_dir() . '/nut-multi-' . bin2hex(random_bytes(12));
+if (!mkdir($dir, 0700)) throw new RuntimeException('Cannot create test sandbox');
 nut_mc_write_cfg("$dir/nut3.cfg", $multi);
 check(nut_mc_deploy($dir, $messages), 'multi-UPS settings are deployed: ' . implode(' | ', $messages));
 check(array_keys(monitors(file_get_contents("$dir/ups/upsmon.conf"))) === ['ups@127.0.0.1', 'spare@127.0.0.1', 'third@127.0.0.1']
@@ -177,8 +212,9 @@ check(array_keys(monitors(file_get_contents("$dir/ups/upsmon.conf"))) === ['ups@
 exec('rm -rf ' . escapeshellarg($dir));
 
 // a previous multi-UPS installation: imported, reviewed, then generated
-$dir = sys_get_temp_dir() . '/nut-multi-legacy-' . getmypid();
-@mkdir("$dir/ups", 0777, true);
+$dir = sys_get_temp_dir() . '/nut-multi-legacy-' . bin2hex(random_bytes(12));
+if (!mkdir($dir, 0700)) throw new RuntimeException('Cannot create test sandbox');
+mkdir("$dir/ups", 0700);
 file_put_contents("$dir/nut3.cfg", "MANUAL=\"enable\"\nNAME=\"rack\"\n");
 file_put_contents("$dir/ups/ups.conf", $legacyUps);
 file_put_contents("$dir/ups/upsmon.conf", "MONITOR rack@127.0.0.1 1 monuser pass master\n");

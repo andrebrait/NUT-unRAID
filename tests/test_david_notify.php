@@ -10,8 +10,8 @@
  * whose command line contains the sandbox path.
  *
  * Limitations: Linux only (/proc), needs flock/pgrep/pkill/timeout/tee/mkfifo. The no-data timeout runs on a
- * fake clock (a `sleep` function that advances $SECONDS), the cancellation and stale worker tests use real time
- * and take about 10 seconds. The script copies are path-rewritten, so a new absolute path in rc.nut or
+ * fake clock (a `sleep` function that advances $SECONDS), the cancellation, slow upssched and stale worker tests use real
+ * time and take about 30 seconds. The script copies are path-rewritten, so a new absolute path in rc.nut or
  * nut-notify that the rewrite does not know makes the harness stop instead of touching the host. upsmon, upsd
  * and the drivers are not run, only their call order and the configuration they would see are checked. */
 
@@ -139,10 +139,16 @@ esac
 exit 0
 SH,
         'usr/sbin/upssched' => <<<'SH'
+echo "$NOTIFYTYPE" >> "$SB/upssched.calls"
+# a slow upssched delivers late: the sleep ignores the fake clock
+[ -n "$UPSSCHED_SLEEP" ] && command sleep "$UPSSCHED_SLEEP"
 echo "upssched UPSNAME=$UPSNAME TYPE=$NOTIFYTYPE" >> "$SB/events"
 exit "${UPSSCHED_RC:-0}"
 SH,
         'usr/bin/upsc' => <<<'SH'
+# like the real client: options end at "--" (or the first non-option), so a name with a leading hyphen needs "--"
+if [ "$1" = "--" ]; then shift; elif [ "${1#-}" != "$1" ]; then echo "upsc: invalid option $1" >&2; exit 1; fi
+echo "$1" >> "$SB/upsc.targets"
 var="$2"; seq="$SB/upsc.seq.$var"
 if [ -f "$seq" ]; then
     n=0; [ -f "$SB/upsc.n.$var" ] && read -r n < "$SB/upsc.n.$var"
@@ -314,6 +320,13 @@ check($code === 0, 'the worker exits cleanly when power is back');
 check(!in_array('FSD', events($sb), true), 'no FSD when the UPS reports OL right before the point of no return');
 check(wait_log($sb, 'FSD cancelled', 1), 'the cancelled FSD is logged');
 
+// a status that names both OL and OB proves nothing: the shutdown goes on
+$sb = sb_new('recheck-ambiguous');
+sb_cfg($sb, ['TIMEOUT' => '3']);
+file_put_contents("$sb/upsc.ups.status", "OL OB\n");
+[$code] = notify_run($sb, 'ONBATT');
+check($code === 0 && events($sb) === ['FSD'], 'a status with OL and OB never cancels the FSD: ' . implode(',', events($sb)));
+
 $sb = sb_new('fsd');
 sb_cfg($sb, ['TIMEOUT' => '3']);
 file_put_contents("$sb/upsc.ups.status", "OB DISCHRG\n");
@@ -403,7 +416,8 @@ sb_cfg($sb, ['TIMEOUT' => '2', 'ONBATTDELAY' => '30']);
 file_put_contents("$sb/upsc.ups.status", "OB\n");
 [$code] = notify_run($sb, 'ONBATT');
 $ev = events($sb);
-check($code === 0 && $ev === ['upssched UPSNAME=ups@127.0.0.1 TYPE=ONBATT', 'FSD'], 'upssched gets the event and the shutdown still follows: ' . implode(',', $ev));
+sort($ev); // upssched and the shutdown criteria run side by side, so their order is not defined
+check($code === 0 && $ev === ['FSD', 'upssched UPSNAME=ups@127.0.0.1 TYPE=ONBATT'], 'upssched gets the event and the shutdown still follows: ' . implode(',', $ev));
 check(strpos(read_file($sb, 'notify.calls'), 'UPS On Battery') === false, 'the on-battery alert is held back for upssched');
 check(strpos(read_file($sb, 'notify.calls'), 'System Shutdown') !== false, 'the shutdown alert is not delayed');
 
@@ -413,6 +427,94 @@ file_put_contents("$sb/upsc.ups.status", "OB\n");
 [$code] = notify_run($sb, 'ONBATT', 'ups@127.0.0.1', ['UPSSCHED_RC' => '1']);
 check($code === 0 && in_array('FSD', events($sb), true), 'a failing upssched does not stop the shutdown');
 check(strpos(read_file($sb, 'notify.calls'), 'UPS On Battery') !== false, 'a failing upssched sends the alert without delay');
+
+// a slow upssched (it may hang for 15 seconds) neither delays the shutdown criteria nor the fallback alert once it fails
+$sb = sb_new('delay-slow');
+sb_cfg($sb, ['TIMEOUT' => '2', 'ONBATTDELAY' => '30']);
+file_put_contents("$sb/upsc.ups.status", "OB\n");
+[$code] = notify_run($sb, 'ONBATT', 'ups@127.0.0.1', ['UPSSCHED_SLEEP' => '3', 'UPSSCHED_RC' => '1']);
+$ev = events($sb);
+check($code === 0 && $ev === ['FSD', 'upssched UPSNAME=ups@127.0.0.1 TYPE=ONBATT'], 'a slow upssched delivers after FSD, the shutdown does not wait for it: ' . implode(',', $ev));
+check(strpos(read_file($sb, 'notify.calls'), 'UPS On Battery') !== false, 'the alert is sent, without delay, once the slow upssched has failed');
+check(log_count($sb, 'upssched failed') === 1, 'the failing upssched is logged');
+
+/* Command lines of the processes still running anything of the sandbox's usr/sbin: workers, upssched and its timeout. */
+function sb_leftovers($sb) {
+    $found = [];
+    foreach (glob('/proc/[0-9]*/cmdline') ?: [] as $file) {
+        $cmd = str_replace("\0", ' ', (string)@file_get_contents($file));
+        if (strpos($cmd, "$sb/usr/sbin/") !== false) $found[] = trim($cmd);
+    }
+    return $found;
+}
+
+// an ONLINE event ends a worker at once, even while its upssched call is still on its way, and takes that call along:
+// delivered after the cancel of ONLINE it would start a timer that nothing stops
+$sb = sb_new('cancel-slow-upssched');
+sb_cfg($sb, ['TIMEOUT' => '60', 'ONBATTDELAY' => '30']);
+file_put_contents("$sb/upsc.ups.status", "OB\n");
+$slow = spawn($sb, ["$sb/usr/sbin/nut-notify", 'UPS on battery'], ['NOTIFYTYPE' => 'ONBATT', 'UPSNAME' => 'ups@127.0.0.1', 'UPSSCHED_SLEEP' => '4'], 'slow');
+check(wait_for(fn() => read_file($sb, 'upssched.calls') === "ONBATT\n", 5), 'the worker calls upssched');
+check(wait_log($sb, $monitoring, 1, 3), 'the shutdown criteria start while upssched is still busy');
+[$code] = notify_run($sb, 'ONLINE', 'ups@127.0.0.1', [], false);
+check($code === 0, 'the ONLINE handler exits cleanly');
+check(wait_for(fn() => !is_running($slow), 3), 'ONLINE ends the worker without waiting for its upssched');
+check(wait_for(fn() => sb_leftovers($sb) === [], 3), 'no worker, timeout or upssched of the cancelled worker is left: ' . implode(' | ', sb_leftovers($sb)));
+sleep(5); // longer than the busy upssched would have needed to deliver
+check(events($sb) === ['upssched UPSNAME=ups@127.0.0.1 TYPE=ONLINE'], 'only ONLINE reached upssched, the call of the cancelled worker never delivered: ' . implode(',', events($sb)));
+check(strpos(read_file($sb, 'notify.calls'), 'UPS On Battery') === false && !in_array('FSD', events($sb), true), 'no on-battery alert and no FSD after the cancel');
+
+// An on-battery event that is handled after ONLINE (a late start) leaves no upssched timer and sends no alert, but its worker
+// is never touched: it keeps its countdown, and only the check right before FSD ends it
+$sb = sb_new('late-onbatt');
+sb_cfg($sb, ['TIMEOUT' => '3', 'ONBATTDELAY' => '30']);
+file_put_contents("$sb/upsc.ups.status", "OL\n");
+file_put_contents("$sb/etc/nut/xnut-notify-hooks.sh", "ONBATT() { echo ran > \"\$SB/onbatt-hook\"; }\n");
+notify_run($sb, 'ONLINE', 'ups@127.0.0.1', [], false);
+$late = worker($sb, 'ups@127.0.0.1', 'late');
+check(wait_log($sb, $monitoring, 1, 3), 'the late worker still starts its shutdown criteria');
+check(wait_for(fn() => !is_running($late), 10), 'the late worker ends by itself');
+check(log_count($sb, 'FSD cancelled') === 1 && !in_array('FSD', events($sb), true), 'its countdown ran and the check right before FSD saw power back');
+check(wait_for(fn() => sb_leftovers($sb) === [], 3), 'nothing of the late on-battery event is left running: ' . implode(' | ', sb_leftovers($sb)));
+check(read_file($sb, 'upssched.calls') === "ONLINE\n" && events($sb) === ['upssched UPSNAME=ups@127.0.0.1 TYPE=ONLINE'], 'the late on-battery event starts no upssched timer: ' . implode(',', events($sb)));
+check(strpos(read_file($sb, 'notify.calls'), 'On Battery') === false && strpos(read_file($sb, 'wall'), 'on battery') === false, 'no on-battery alert after power is back');
+check(!file_exists("$sb/onbatt-hook"), 'a late on-battery event does not run the on-battery hook');
+check(log_count($sb, 'late on-battery event') === 1, 'the late event is logged');
+
+// a status naming both OL and OB, or one OL reading that the next reading contradicts, is an outage, not a late event
+$sb = sb_new('late-ambiguous');
+sb_cfg($sb, ['TIMEOUT' => '2', 'ONBATTDELAY' => '30']);
+file_put_contents("$sb/upsc.ups.status", "OL OB\n");
+[$code] = notify_run($sb, 'ONBATT');
+$ev = events($sb);
+sort($ev);
+check($code === 0 && $ev === ['FSD', 'upssched UPSNAME=ups@127.0.0.1 TYPE=ONBATT'], 'an ambiguous status neither skips upssched nor cancels the FSD: ' . implode(',', events($sb)));
+check(log_count($sb, 'late on-battery event') === 0 && strpos(read_file($sb, 'notify.calls'), 'System Shutdown') !== false, 'an ambiguous status is handled as an outage');
+
+$sb = sb_new('late-contradicted');
+sb_cfg($sb, ['TIMEOUT' => '2', 'ONBATTDELAY' => '30']);
+file_put_contents("$sb/upsc.seq.ups.status", "OL\nOB\nOB\n"); // one OL reading, then on battery again until the check before FSD
+[$code] = notify_run($sb, 'ONBATT', 'ups@127.0.0.1', [], false);
+$ev = events($sb);
+sort($ev);
+check($code === 0 && $ev === ['FSD', 'upssched UPSNAME=ups@127.0.0.1 TYPE=ONBATT'], 'a single OL reading does not skip upssched or cancel the FSD: ' . implode(',', events($sb)));
+check(log_count($sb, 'late on-battery event') === 0, 'a contradicted OL reading is not a late event');
+
+// a UPS name that starts with a hyphen is a name for upsc, not an option
+$sb = sb_new('hyphen');
+sb_cfg($sb, ['NAME' => '-lead', 'SHUTDOWN' => 'batt_level', 'BATTERYLEVEL' => '20']);
+file_put_contents("$sb/upsc.ups.status", "OB\n");
+file_put_contents("$sb/upsc.seq.battery.charge", "50\n15\n");
+[$code] = notify_run($sb, 'ONBATT', '-lead@127.0.0.1');
+check($code === 0 && events($sb) === ['FSD'] && trim(read_file($sb, 'upsc.n.battery.charge')) === '2', 'the battery level of a hyphen-named UPS is read: ' . implode(',', events($sb)));
+check(log_count($sb, 'No usable') === 0, 'a hyphen-named UPS has battery data');
+check(array_values(array_unique(array_filter(explode("\n", read_file($sb, 'upsc.targets')), 'strlen'))) === ['-lead@127.0.0.1'], 'upsc is asked for the whole hyphen-named UPS: ' . read_file($sb, 'upsc.targets'));
+
+$sb = sb_new('hyphen-online');
+sb_cfg($sb, ['NAME' => '-lead', 'TIMEOUT' => '2']);
+file_put_contents("$sb/upsc.ups.status", "OL\n");
+[$code] = notify_run($sb, 'ONBATT', '-lead@127.0.0.1');
+check($code === 0 && events($sb) === [] && log_count($sb, 'FSD cancelled') === 1, 'the status of a hyphen-named UPS is rechecked before FSD: ' . implode(',', events($sb)));
 
 // ================= rc.nut: restart ordering
 $stopped = ['upsmon-stop', 'upsd-stop', 'drvctl-stop old=OLD'];
@@ -542,6 +644,46 @@ touch("$sb/etc/nut/killpower");
 file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR ups@localhost 1 monuser monpass master\nMONITOR backup@localhost 1 monuser monpass slave\nMONITOR watch@localhost 0 monuser monpass slave\n");
 [$code] = rc($sb, 'shutdown');
 check($code === 0 && events($sb) === ['drvctl-shutdown ups', 'drvctl-shutdown backup'], 'a pending import powers off the legacy monitors, not the watcher: ' . implode(' | ', events($sb)));
+
+// a monitor on another port is another upsd: its UPS only counts when the local upsd listens there (3493 by default),
+// so a same-named local UPS on 3493 is never powered off for it. The upsd.conf in use decides, also while an import is pending.
+$sb = sb_new('killpower-ports');
+sb_cfg($sb, ['NAME' => 'primary']);
+touch("$sb/etc/nut/killpower");
+file_put_contents("$sb/etc/nut/upsmon.conf", <<<'CONF'
+MONITOR spare@127.0.0.1:3494 1 monuser pw master
+MONITOR same@localhost:3493 1 monuser pw master
+MONITOR other@[::1]:3495 1 monuser pw master
+MONITOR plain@::1 1 monuser pw master
+MONITOR remote@192.168.1.5:3493 1 monuser pw master
+CONF);
+$primary = 'drvctl-shutdown primary';
+$listen = [
+    'no upsd.conf' => [null, [$primary, 'drvctl-shutdown same', 'drvctl-shutdown plain']],
+    'no LISTEN line' => ["MAXAGE 15\n", [$primary, 'drvctl-shutdown same', 'drvctl-shutdown plain']],
+    'LISTEN without a port' => ["LISTEN ::\n", [$primary, 'drvctl-shutdown same', 'drvctl-shutdown plain']],
+    'a custom loopback port' => ["LISTEN 127.0.0.1 3494\nLISTEN 192.168.1.2\n", [$primary, 'drvctl-shutdown spare']],
+    'a custom port, any case and comments' => ["# listeners\nLISTEN LocalHost 3494 # local\n", [$primary, 'drvctl-shutdown spare']],
+    'wildcards on two ports' => ["LISTEN 0.0.0.0 3493\nLISTEN :: 3495\n", [$primary, 'drvctl-shutdown same', 'drvctl-shutdown other', 'drvctl-shutdown plain']],
+    'LAN address only' => ["LISTEN 192.168.1.2 3494\n", [$primary]],
+    'port that is not a number' => ["LISTEN 127.0.0.1 abc\n", [$primary]],
+    'line with extra words' => ["LISTEN 127.0.0.1 3494 extra\n", [$primary]],
+];
+foreach ($listen as $case => [$upsd, $expected]) {
+    if ($upsd === null) @unlink("$sb/etc/nut/upsd.conf"); else file_put_contents("$sb/etc/nut/upsd.conf", $upsd);
+    file_put_contents("$sb/events", '');
+    [$code] = rc($sb, 'shutdown');
+    check($code === 0 && events($sb) === $expected, "$case: only the monitors of the local upsd are powered off: " . implode(' | ', events($sb)));
+}
+
+$sb = sb_new('killpower-pending-port');
+sb_cfg($sb, ['NAME' => 'ups']);
+file_put_contents("$sb/boot/config/plugins/nut3/import-report.json", json_encode(['date' => '2026-01-01 00:00', 'notes' => []]));
+touch("$sb/etc/nut/killpower");
+file_put_contents("$sb/etc/nut/upsd.conf", "LISTEN 127.0.0.1 3494\n");
+file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR legacy@127.0.0.1:3494 1 monuser monpass master\nMONITOR elsewhere@127.0.0.1:3493 1 monuser monpass master\n");
+[$code] = rc($sb, 'shutdown');
+check($code === 0 && events($sb) === ['drvctl-shutdown ups', 'drvctl-shutdown legacy'], 'a pending import follows the port of the legacy upsd, not a fixed one: ' . implode(' | ', events($sb)));
 
 // names go to upsdrvctl only when safe: invalid ones are reported, a leading hyphen is passed after "--"
 $sb = sb_new('killpower-names');
