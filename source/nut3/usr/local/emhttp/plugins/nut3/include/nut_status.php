@@ -29,10 +29,14 @@ try {
     $green  = "class='green-text'";
     $orange = "class='orange-text'";
     $status = array_fill(0,7,"<td>-</td>");
-    $all    = $_GET['all']=='true';
+    $all    = ($_GET['all'] ?? '') == 'true';
 
     if ($nut_running) {
-        $rows = nut_status_rows($nut_name, $nut_ip);
+        // optional ups=<name>: any UPS from nut_ups_list, default the GUI UPS
+        $ups_list = nut_ups_list($nut_name, $nut_ip);
+        $sel = (string)($_REQUEST['ups'] ?? '');
+        if (!isset($ups_list[$sel])) $sel = $nut_name;
+        $rows = nut_status_rows($sel, $ups_list[$sel]);
 
         if (isset($_GET['diagsave']) && $_GET['diagsave'] == "true") {
             $diagarray = $rows;
@@ -71,7 +75,7 @@ try {
         $descriptorMapping = [];
         $descriptorFilePath = '/usr/share/nut/cmdvartab';
         try {
-            if (file_exists($descriptorFilePath) && $descriptorFileHandle = fopen($descriptorFilePath, 'r')) {
+            if ($all && file_exists($descriptorFilePath) && $descriptorFileHandle = fopen($descriptorFilePath, 'r')) {
                 while (($descriptorFileLine = fgets($descriptorFileHandle)) !== false) {
                     if (preg_match('/^VARDESC\s+([a-zA-Z0-9_.]+)\s+"([^"]+)"$/', trim($descriptorFileLine), $descriptorRegexMatches)) {
                         $descriptorMapping[$descriptorRegexMatches[1]] = nut_html($descriptorRegexMatches[2]);
@@ -87,13 +91,16 @@ try {
 
         for ($i=0; $i<count($rows); $i++) {
             $row = array_map('trim', explode(':', $rows[$i], 2));
+            // values come from the UPS: kept raw here and escaped once where they reach the page
             $key = $row[0];
-            $val = $row[1];
+            $val = $row[1] ?? '';
 
             switch ($key) {
                 case 'ups.status':
                     if ($upsStatus['fulltext']) {
-                        $status[0] = '<td' . (isset($nut_msgSeverity[$upsStatus['severity']]) ? ' class="' . $nut_msgSeverity[$upsStatus['severity']]['css_class'] . '"' : '') . '>' . implode(' - ', array_map('nut_html', $upsStatus['fulltext'])) . '</td>';
+                        // icon + text next to the colour, so severity is not colour-only
+                        $sevIcon = [1 => '<i class="fa fa-exclamation-triangle"></i> ', 2 => '<i class="fa fa-exclamation-circle"></i> '][$upsStatus['severity']] ?? '';
+                        $status[0] = '<td' . (isset($nut_msgSeverity[$upsStatus['severity']]) ? ' class="' . $nut_msgSeverity[$upsStatus['severity']]['css_class'] . '"' : '') . '>' . $sevIcon . implode(' - ', array_map('nut_html', $upsStatus['fulltext'])) . '</td>';
                     } else {
                         $status[0] = '<td class="' . $nut_msgSeverity[1]['css_class'] . '">Refreshing...</td>';
                     }
@@ -133,7 +140,7 @@ try {
                 if ($i%2==0) $result[] = "<tr>";
 
                 if(isset($descriptorMapping[$key])) {
-                    $result[]= "<td><span class='tooltip-nutvar' style='cursor:help;' title='$descriptorMapping[$key]'><strong>" . nut_html($key) . "</strong></span></td><td>" . nut_html($val) . "</td>";
+                    $result[]= "<td><span class='tooltip-nutvar nut-help-cursor' title='$descriptorMapping[$key]'><strong>" . nut_html($key) . "</strong></span></td><td>" . nut_html($val) . "</td>";
                 } else {
                     $result[]= "<td><strong>" . nut_html($key) . "</strong></td><td>" . nut_html($val) . "</td>";
                 }
@@ -216,7 +223,28 @@ try {
 
         if ($all && count($rows)%2==1) $result[] = "<td></td><td></td></tr>";
     }
-    if ($all && !$rows) $result[] = "<tr><td colspan='4' style='text-align:center'>No information available</td></tr>";
+    if ($nut_running && count($ups_list) > 1) {
+        $ov = nut_ups_overview($ups_list);
+        $nuts_response["success"]["selected"] = $sel;
+        if ($all) {
+            $t = '';
+            foreach ($ov as $n => $u) {
+                $n_e = nut_html($n);
+                $c = '<td colspan="6" class="red-text"><i class="fa fa-times-circle"></i> Unreachable</td>';
+                if ($u['ok']) $c = "<td class='{$u['css']}'>{$u['status']}</td><td>{$u['bat']}</td><td>{$u['rt']}</td><td>{$u['load']}</td><td>{$u['vin']} / {$u['vout']}</td>";
+                $t .= "<tr class='nut-upsrow" . ($n === $sel ? " nut-sel" : "") . "'><td><a href='#' class='nut-upssel' data-ups='$n_e'><strong>$n_e</strong></a></td>" . ($u['ok'] ? "<td>{$u['desc']}</td>" : "") . $c . "</tr>";
+            }
+            $nuts_response["success"]["upsrows"] = $t;
+        } else {
+            $t = '';
+            foreach ($ov as $n => $u) {
+                if ($n === $nut_name) continue;
+                $t .= "<span class='nut-oth'><strong>" . nut_html($n) . "</strong> " . ($u['ok'] ? "<span class='{$u['css']}'>{$u['word']} {$u['bat']}</span>" : "<span class='red-text'><i class='fa fa-times-circle'></i> Unreachable</span>") . "</span> ";
+            }
+            $nuts_response["success"]["upsline"] = $t;
+        }
+    }
+    if ($all && !$rows) $result[] = "<tr><td colspan='4' class='nut-center'>No information available</td></tr>";
 
     if($all) {
         $nuts_response["success"]["response"] = "<tr>".implode('', $status)."</tr>";

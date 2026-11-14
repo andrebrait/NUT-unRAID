@@ -1,11 +1,18 @@
 #!/bin/bash
 # Page-test stand-in for NUT's upsmon. "-p" starts a daemon that `pgrep -x upsmon` finds (a copy of sleep
-# named upsmon, see harness.py), "-c stop" stops it, anything else succeeds.
+# named upsmon, see harness.py) and records its pid in /var/run/nut/upsmon.pid like the real one: the plugin's
+# pages decide whether NUT runs from that pidfile and /proc/<pid>/comm, not from pgrep. "-c stop" stops the
+# daemon and removes the pidfile, anything else succeeds.
 daemon=/usr/libexec/nut-e2e/upsmon
+pidfile=/var/run/nut/upsmon.pid
 case "$1 $2" in
     "-c stop")
-        pkill -f "^$daemon" ;;  # the daemon's command line, never this script's
+        pkill -f "^$daemon"  # the daemon's command line, never this script's
+        for _ in $(seq 50); do pgrep -f "^$daemon" >/dev/null || break; sleep 0.1; done
+        rm -f "$pidfile" ;;
     -p*)
-        pgrep -f "^$daemon" >/dev/null || { setsid "$daemon" infinity </dev/null >/dev/null 2>&1 & } ;;
+        mkdir -p "${pidfile%/*}"
+        # the shell writes its own pid, which exec keeps for the daemon, so the file is there before pgrep finds the daemon
+        pgrep -f "^$daemon" >/dev/null || { setsid sh -c 'echo $$ > "$1"; exec "$2" infinity' sh "$pidfile" "$daemon" </dev/null >/dev/null 2>&1 & } ;;
 esac
 exit 0

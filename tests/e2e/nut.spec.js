@@ -26,6 +26,38 @@ test.describe('NUT Settings', () => {
     await settled(page);
   });
 
+  test('checks a slave UPS connection using the current form values', async ({ page }) => {
+    root.write(`${FIXTURES}/upsc.txt`, 'ups.status: OL CHRG\n');
+    await page.goto(SETTINGS);
+    await page.locator('#MODE').selectOption('slave');
+    await page.locator('#IPADDR').fill('nas.local:3493');
+    await page.locator('#NAME').fill('ups');
+    await page.locator('#btnTestConn').click();
+    await expect(page.locator('#nut_testconn_result')).toContainText('Status: OL CHRG');
+    await expect(page.locator('#nut_testconn_result')).toContainText('username and password are not checked');
+    await page.locator('#NAME').fill('missing');
+    await page.locator('#btnTestConn').click();
+    await expect(page.locator('#nut_testconn_result')).toContainText('was not found');
+
+    // the endpoint answers POST only: a GET (a link or image on another site) and a POST without the webGui's CSRF token do nothing
+    const endpoint = '/plugins/nut3/include/nut_testconn.php';
+    const get = await (await page.request.get(`${endpoint}?host=nas.local&name=ups`)).json();
+    expect(get.ok).toBe(false);
+    expect(get.html).toContain('POST required.');
+    const forged = await page.request.post(endpoint, { form: { host: 'nas.local', name: 'ups' } });
+    expect(await forged.text()).not.toContain('Status: OL CHRG');
+  });
+
+  test('offers every configured UPS for the battery self-test and keeps a saved one that is not listed', async ({ page }) => {
+    setCfg({ BATTTESTUPS: 'retired' });
+    await page.goto(SETTINGS);
+    await page.locator('#SEC_BATTTEST > summary').click();
+    await expect(page.locator('#BATTTESTUPS option[value=""]')).toHaveText('GUI UPS (ups)');
+    await expect(page.locator('#BATTTESTUPS option[value="ups"]')).toHaveCount(1);
+    await expect(page.locator('#BATTTESTUPS option[value="retired"]')).toHaveCount(1);
+    await expect(page.locator('#BATTTESTUPS')).toHaveValue('retired');
+  });
+
   test('writes custom directives after the managed lines of each file', async ({ page }) => {
     const custom = {
       CUSTOM_NUT: 'ALLOW_NO_DEVICE=true',
@@ -155,10 +187,10 @@ test.describe('Import of a previous configuration', () => {
     await page.goto(SETTINGS);
     await expect(banner(page)).toContainText('more than one UPS section');
     await expect(banner(page)).toContainText('Manual configuration mode');
-    await expect(problems(page).locator('li')).toHaveCount(6);
+    await expect(problems(page).locator('li')).toHaveCount(3);
 
     // the user fixes one conflict; Apply still reports the others and writes nothing
-    await field(page, 'CUSTOM_UPS').fill('vendorid = "051D"\ndesc = "Rack UPS 1"');
+    await field(page, 'CUSTOM_UPS').fill('vendorid = "051D"\ndesc = "Rack UPS 1"\n[spare]\ndriver = nutdrv_qx\nport = auto');
     const before = flashChecksums();
     await applyRejected(page, 'user [remote] is generated from the settings above', '"NOTIFYFLAG" is set from the settings above');
     expect(flashChecksums()).toEqual(before);
@@ -170,7 +202,10 @@ test.describe('Import of a previous configuration', () => {
     await expect(problems(page)).toHaveCount(0);
     expect(root.exists(`${FLASH}/import-report.json`)).toBe(false);
     const files = upsFiles();
-    expect(files['ups.conf']).toMatch(/\[rack\]\n[^[]*# Custom directives\nvendorid = "051D"\ndesc = "Rack UPS 1"\n$/);
+    expect(files['ups.conf']).toMatch(/\[rack\]\n[^[]*# Custom directives\nvendorid = "051D"\ndesc = "Rack UPS 1"\n\[spare\]\ndriver = nutdrv_qx\nport = auto\n$/);
+    expect(files['upsmon.conf']).toMatch(/MONITOR spare@127\.0\.0\.1 0 \S+ ".*" slave/);
+    await page.locator('#SEC_BATTTEST > summary').click();
+    await expect(page.locator('#BATTTESTUPS option[value="spare"]')).toHaveCount(1);
     expect(files['upsd.users']).toMatch(/# Custom directives\n\[homeassistant\]\npassword = ha\nupsmon slave\n$/);
     expect(files['upsmon.conf']).toMatch(/# Custom directives\nNOTIFYFLAG LOWBATT SYSLOG\+EXEC\nFINALDELAY 10\n$/);
   });
@@ -199,8 +234,39 @@ test.describe('NUT Commands', () => {
     await quickTest.locator('.nutcmdconfirmbox').check();
     await quickTest.locator('.nutcmdbutton').click();
     await expect(page.locator('.sweet-alert')).toContainText('The backend driver has responded with the following message');
-    expect(root.read(`${FIXTURES}/upscmd.log`)).toContain('-u upsadmin -p Adm1nPass ups@127.0.0.1 test.battery.start.quick\n');
+    expect(root.read(`${FIXTURES}/upscmd.log`)).toContain('-u upsadmin -p Adm1nPass -- ups@127.0.0.1 test.battery.start.quick\n');
     expect(await page.content()).not.toContain('Adm1nPass');
+  });
+
+  test('a slow answer for a UPS that is no longer selected does not replace the outlets and variables of the current one', async ({ page }) => {
+    let release;
+    const released = new Promise((resolve) => { release = resolve; });
+    await page.route(/\/plugins\/nut3\/include\/nut_(commands|upsrw)\.php/, async (route) => {
+      const form = new URLSearchParams(route.request().postData() || '');
+      const ups = form.get('nutups');
+      if (ups === 'slow') await released;
+      const body = form.get('nutaction') === 'outlets'
+        ? { success: { outlets: { 1: { desc: `outlet of ${ups}`, status: 'on', switchable: 'yes', cmds: {} } } } }
+        : { success: { vars: { 'ups.id': { desc: `variable of ${ups}`, type: 'STRING', value: ups, options: [], maxlen: 10 } } } };
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+    });
+    await page.goto('/Settings/NUTcommands');
+    // two more UPSes next to the configured one: one answers slowly, one at once
+    await page.evaluate(() => {
+      const $ = /** @type {any} */ (window).jQuery;
+      for (const select of ['#nutoutups', '#nutrwups']) for (const ups of ['slow', 'fast']) $(select).append(new Option(ups, ups));
+    });
+    for (const [select, body, text] of [['#nutoutups', '#nutoutbody', 'outlet of'], ['#nutrwups', '#nutrwbody', 'variable of']]) {
+      await page.locator(select).selectOption('slow');
+      await page.locator(select).selectOption('fast');
+      await expect(page.locator(body)).toContainText(`${text} fast`);
+    }
+    release();
+    await settled(page);
+    for (const [body, text] of [['#nutoutbody', 'outlet of'], ['#nutrwbody', 'variable of']]) {
+      await expect(page.locator(body)).toContainText(`${text} fast`);
+      await expect(page.locator(body)).not.toContainText(`${text} slow`);
+    }
   });
 });
 
@@ -238,6 +304,32 @@ test('UPS data is shown as text in the status table, the details and the footer'
   await expect(page.locator(injectedElements)).toHaveCount(0);
   expect(await page.evaluate(() => /** @type {any} */ (window).__nutXss)).toBeUndefined();
   expect(injected).toEqual([]);
+});
+
+test('a slow answer for a UPS that is no longer selected does not replace the details of the current one', async ({ page }) => {
+  const rows = ['slow', 'fast'].map((ups) => `<tr><td><a href="#" class="nut-upssel" data-ups="${ups}">${ups}</a></td></tr>`).join('');
+  const answer = (ups) => JSON.stringify({
+    success: { response: '<tr><td>summary</td></tr>', allvars: `<tr><td colspan="4">variables of ${ups || 'the GUI UPS'}</td></tr>`, upsrows: rows },
+  });
+  let release;
+  const released = new Promise((resolve) => { release = resolve; });
+  await page.route(/\/plugins\/nut3\/include\/nut_status\.php/, async (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    if (params.get('all') !== 'true') return route.fallback(); // the footer's own requests
+    const ups = params.get('ups');
+    if (ups === 'slow') await released;
+    await route.fulfill({ contentType: 'application/json', body: answer(ups) });
+  });
+  await page.goto(SETTINGS);
+  const variables = page.locator('#nut_status');
+  await expect(variables).toContainText('variables of the GUI UPS');
+  await page.locator('.nut-upssel[data-ups="slow"]').click();
+  await page.locator('.nut-upssel[data-ups="fast"]').click();
+  await expect(variables).toContainText('variables of fast');
+  release();
+  await settled(page);
+  await expect(variables).toContainText('variables of fast');
+  await expect(variables).not.toContainText('variables of slow');
 });
 
 function esc(text) {

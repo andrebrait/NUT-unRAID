@@ -20,11 +20,11 @@ BOOT="/boot/config/plugins/nut3"
 DOCROOT="/usr/local/emhttp/plugins/nut3"
 
 # Add nut user and group (for legacy packages)
-if [ "$( grep -ic "218" /etc/group )" -eq 0 ]; then
+if ! grep -q "^nut:" /etc/group; then
     groupadd -g 218 nut >/dev/null 2>&1
 fi
 
-if [ "$( grep -ic "218" /etc/passwd )" -eq 0 ]; then
+if ! grep -q "^nut:" /etc/passwd; then
     useradd -u 218 -g nut -s /bin/false nut >/dev/null 2>&1
 fi
 
@@ -33,6 +33,8 @@ chmod 755 $DOCROOT/scripts/* \
         /etc/rc.d/rc.nut \
         /etc/rc.d/rc.nutstats \
         /usr/sbin/nut-notify \
+        /usr/sbin/nut-batttest \
+        /usr/sbin/nut-upssched-cmd \
         /usr/sbin/nutstats
 
 # copy the default

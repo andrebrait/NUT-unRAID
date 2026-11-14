@@ -100,7 +100,7 @@ try {
             foreach ($ups_alarm as $al) {
                 $alarms .= "<br>- " . nut_tooltip_html($ups_status[$al]);
             }
-            $status[0] = "<span id='nut_alarm' class='tooltip-nut $red' data=\"$alarms\"><i class='fa fa-bell faa-ring animated'></i></span>";
+            $status[0] = "<span id='nut_alarm' class='tooltip-nut $red' data=\"$alarms\"><i class='fa fa-bell faa-ring animated'></i><span class='nut-sr'> UPS alarm active</span></span>";
         }
 
         $battery_runtime = (array_key_exists($nut_runtime, $ups_status) && is_numeric($ups_status[$nut_runtime])) ? nut_format_time($ups_status[$nut_runtime],$nut_rtunit) : "n/a";
@@ -138,7 +138,7 @@ try {
 
         $statusTooltipData = ' data="<b>NUT Device Status:</b><br>[' . nut_html($nut_name) . '] ' . implode(' - ', array_map('nut_tooltip_html', $online['fulltext'])) . '"';
 
-        $status[1] = "<span id='" . ($nut_footer_style == 0 ? "nut_battery" : "") . "' class='".($nut_footer_style == 0 || $online['severity'] > 0 ? "tooltip-nut" : "")." " . $css_class . "'" . $statusTooltipData . "><i class='fa " . $fa_icon . "' style='vertical-align: baseline;'></i>&thinsp;" . $batteryText . "</span>";
+        $status[1] = "<span id='" . ($nut_footer_style == 0 ? "nut_battery" : "") . "' class='".($nut_footer_style == 0 || $online['severity'] > 0 ? "tooltip-nut" : "")." " . $css_class . "'" . $statusTooltipData . "><i class='fa " . $fa_icon . "' style='vertical-align: baseline;'></i>&thinsp;" . $batteryText . "<span class='nut-sr'> " . implode(' - ', array_map('nut_html', $online['fulltext'])) . "</span></span>";
 
         # if no ups.load compute from ups.power(.nominal) or ups.realpower(.nominal)
         # also compute if calculation is otherwise forced by user setting
@@ -182,7 +182,7 @@ try {
         # show connected clients in netserver mode
         if ($nut_mode == "netserver" && $nut_footer_conns !== "disable") {
             try {
-                exec(NUT_CLIENT_TIMEOUT . "/usr/bin/upsc -c ".escapeshellarg($nut_name)."@".escapeshellarg($nut_ip)." 2>/dev/null", $nutc_rows);
+                exec(NUT_CLIENT_TIMEOUT . "/usr/bin/upsc -c -- ".escapeshellarg($nut_name)."@".escapeshellarg($nut_ip)." 2>/dev/null", $nutc_rows);
                 if(!empty($nutc_rows)) {
                     $nutc_rows = array_diff($nutc_rows, [explode(":", $nut_ip)[0]]);
                     $nutc_count = count($nutc_rows);
@@ -202,7 +202,7 @@ try {
                 unset($status[3]);
             }
         }
-        $status[2] = "<span id='".($nut_footer_style == 0 ? "nut_power" : "")."' class='".($nut_footer_style == 0 || $load >= 90 ? "tooltip-nut" : "")." " . ($load >= 90 ? $red : ($nut_footer_style == 1 ? $black : $green)) . "'" . $powerTooltipData . "><i class='fa fa-plug'></i>&thinsp;" . $powerText . "</span>";
+        $status[2] = "<span id='".($nut_footer_style == 0 ? "nut_power" : "")."' class='".($nut_footer_style == 0 || $load >= 90 ? "tooltip-nut" : "")." " . ($load >= 90 ? $red : ($nut_footer_style == 1 ? $black : $green)) . "'" . $powerTooltipData . "><i class='fa fa-plug'></i>&thinsp;" . $powerText . ($load >= 90 ? "<span class='nut-sr'> High load</span>" : "") . "</span>";
 
         if($nut_syslog_method == "file" || $nut_syslog_method == "both") {
             if(file_exists("/var/log/nut.log")) {

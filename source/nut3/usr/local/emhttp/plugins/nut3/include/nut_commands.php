@@ -18,54 +18,11 @@
  *
  */
 require_once '/usr/local/emhttp/plugins/nut3/include/nut_config.php';
-require_once '/usr/local/emhttp/plugins/nut3/include/nut_managed.php';
 $resp = [];
 
+// the rules (POST only, module switch, advertised commands only, stored credentials) are in nut_commands_response()
 try {
-    // commands run as the admin user configured in the NUT settings, the browser never sees its password
-    $nutcmd_userval = $nut_cfg['ADMINUSER'] ?? '';
-    $nutcmd_passval = nut_mc_decode($nut_cfg['ADMINPASS'] ?? '') ?? '';
-    if($nutcmd_userval === '' || $nutcmd_passval === '') {
-        $resp["error"]["response"] = "No NUT Admin credentials are configured in the NUT Settings.";
-    }
-    elseif(isset($_POST["nutcmdname"]))
-    {
-        $nutcmd = escapeshellarg($_POST["nutcmdname"]);
-        $nutcmd_user = escapeshellarg($nutcmd_userval);
-        $nutcmd_pass = escapeshellarg($nutcmd_passval);
-        $nutcmd_ups = escapeshellarg($nut_name);
-        $nutcmd_ip = escapeshellarg($nut_ip);
-        $nutcmd_arg = (isset($_POST["nutcmdarg"]) && !empty($_POST["nutcmdarg"])) ? escapeshellarg($_POST["nutcmdarg"]) : false;
-
-        $nutcmd_retval = -1;
-        $nutcmd_retarr = [];
-
-        if(isset($_POST["nutcmdwait"])) {
-            if($nutcmd_arg) {
-                exec("upscmd -u $nutcmd_user -p $nutcmd_pass -w $nutcmd_ups@$nutcmd_ip $nutcmd $nutcmd_arg 2>&1", $nutcmd_retarr, $nutcmd_retval);
-            } else {
-                exec("upscmd -u $nutcmd_user -p $nutcmd_pass -w $nutcmd_ups@$nutcmd_ip $nutcmd 2>&1", $nutcmd_retarr, $nutcmd_retval);
-            }
-            if($nutcmd_retval === 0) {
-                $resp["success"]["response"] = htmlspecialchars(implode(PHP_EOL, $nutcmd_retarr) ?? "");
-            } else {
-                $resp["error"]["response"] = htmlspecialchars(implode(PHP_EOL, $nutcmd_retarr) ?? "");
-            }
-        } else {
-            if($nutcmd_arg) {
-                exec("upscmd -u $nutcmd_user -p $nutcmd_pass $nutcmd_ups@$nutcmd_ip $nutcmd $nutcmd_arg 2>&1", $nutcmd_retarr, $nutcmd_retval);
-            } else {
-                exec("upscmd -u $nutcmd_user -p $nutcmd_pass $nutcmd_ups@$nutcmd_ip $nutcmd 2>&1", $nutcmd_retarr, $nutcmd_retval);
-            }
-            if($nutcmd_retval === 0) {
-                $resp["success"]["response"] = htmlspecialchars(implode(PHP_EOL, $nutcmd_retarr) ?? "");
-            } else {
-                $resp["error"]["response"] = htmlspecialchars(implode(PHP_EOL, $nutcmd_retarr) ?? "");
-            }
-        }
-    } else {
-        $resp["error"]["response"] = "Missing required POST variables!";
-    }
+    $resp = nut_commands_response($_SERVER['REQUEST_METHOD'] ?? '', $_POST, $nut_cfg, nut_ups_list($nut_name, $nut_ip), $nut_name, 'nut_run');
 }
 catch (\Throwable $t) {
     error_log($t);

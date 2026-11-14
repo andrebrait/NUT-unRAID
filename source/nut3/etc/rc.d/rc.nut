@@ -30,8 +30,80 @@ PLGPATH="/boot/config/plugins/nut3"
 CONFIG=$PLGPATH/nut3.cfg
 DOCROOT="/usr/local/emhttp/plugins/nut3"
 
+# serialize service and config changes; shutdown paths (rc.6) stay lock-free.
+# -o keeps the lock fd out of the daemons this script starts.
+case "$1" in
+    start|start_upsmon|stop|reload|restart|write_config)
+        if [ -z "$RCNUT_LOCKED" ]; then
+            RCNUT_LOCKED=1 exec flock -o -w 180 /var/run/rc.nut.lock "$0" "$@"
+        fi
+        ;;
+esac
+# the guard is for this process only; it must not leak into the daemons and hooks started below
+unset RCNUT_LOCKED
+
 # read our configuration
 [ -e "$CONFIG" ] && source $CONFIG
+
+# scheduled battery self-test: cron file for nut-batttest, removed when the schedule is off
+write_batttest_cron() {
+    local f=/boot/config/plugins/dynamix/nut-batttest.cron h="${BATTTESTHOUR:-3}" wd="${BATTTESTWDAY:-0}" md="${BATTTESTMDAY:-1}" line=""
+    [[ "$h" =~ ^([0-9]|1[0-9]|2[0-3])$ ]] || h=3
+    [[ "$wd" =~ ^[0-6]$ ]] || wd=0
+    [[ "$md" =~ ^([1-9]|1[0-9]|2[0-8])$ ]] || md=1
+    case "$BATTTEST" in
+        weekly)  line="0 $h * * $wd /usr/sbin/nut-batttest > /dev/null 2>&1" ;;
+        monthly) line="0 $h $md * * /usr/sbin/nut-batttest > /dev/null 2>&1" ;;
+    esac
+    if [ -n "$line" ]; then
+        # only touch the flash (and cron) when the schedule changed
+        if [ "$(cat "$f" 2>/dev/null)" != "$(printf '# NUT scheduled battery self-test\n%s' "$line")" ]; then
+            printf '# NUT scheduled battery self-test\n%s\n' "$line" > "$f"
+            update_cron
+        fi
+    elif [ -f "$f" ]; then
+        rm -f "$f"
+        update_cron
+    fi
+}
+
+# true if the driver for UPS $1 (default: the GUI-configured UPS name) is running
+monitored_driver_running() {
+    local pidfile
+    for pidfile in /var/run/nut/*-"${1:-$NAME}".pid; do
+        [ -e "$pidfile" ] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+# UPS section names of ups.conf, one per line
+ups_sections() {
+    sed -n 's/^[[:space:]]*\[\([^]][^]]*\)\].*/\1/p' /etc/nut/ups.conf 2>/dev/null
+}
+
+# retry drivers that are not running yet (USB devices can be slow to appear after boot or an outage)
+# fails if no driver can be retried at all (no or unreadable ups.conf, no UPS section): nothing was started
+retry_drivers() {
+    local try ups missing sections
+    mapfile -t sections < <(ups_sections)
+    [ "${#sections[@]}" -gt 0 ] || return 1
+    for try in 1 2 3; do
+        missing=()
+        for ups in "${sections[@]}"; do
+            monitored_driver_running "$ups" || missing+=("$ups")
+        done
+        [ "${#missing[@]}" -eq 0 ] && return 0
+        echo "NUT driver(s) not running: ${missing[*]}, retrying in 10 seconds (attempt ${try}/3)..."
+        sleep 10
+        for ups in "${missing[@]}"; do
+            /usr/sbin/upsdrvctl -u root -- start "$ups"
+        done
+    done
+    for ups in "${sections[@]}"; do
+        monitored_driver_running "$ups" || return 1
+    done
+    return 0
+}
 
 error_at_start() {
     if [ -d $DOCROOT/misc ]; then
@@ -41,7 +113,31 @@ error_at_start() {
 }
 
 start_driver() {
-    /usr/sbin/upsdrvctl -u root start || error_at_start
+    if ! /usr/sbin/upsdrvctl -u root start && ! retry_drivers; then
+        # upsdrvctl fails if any one driver fails. Only abort when no driver
+        # is running at all; otherwise carry on so upsd and upsmon still
+        # protect the system with the UPS devices that did come up.
+        if ! pgrep -f "^$DRIVERPATH/" >/dev/null 2>&1; then
+            if [ -x /usr/local/emhttp/webGui/scripts/notify ]; then
+                timeout -s9 15 /usr/local/emhttp/webGui/scripts/notify -e "NUT" -s "NUT: UPS driver failed to start" -d "No UPS driver started; this system will not shut down on power loss. Check the SYSLOG." -i alert >/dev/null 2>&1
+            fi
+            error_at_start
+        fi
+        echo "WARNING: NUT failed to start one or more UPS drivers, continuing with the drivers that did start."
+        SUBJECT="NUT: UPS driver failed to start"
+        DESCRIPTION="One or more UPS drivers failed to start; NUT is running with the remaining drivers. Check the SYSLOG."
+        LEVEL="warning"
+        # upsmon still starts (so NOCOMM alerts fire), but say loudly that shutdown protection is gone
+        if ! monitored_driver_running; then
+            echo "ERROR: The driver for the monitored UPS [${NAME}] is not running, this system is NOT protected by NUT."
+            SUBJECT="NUT: monitored UPS [${NAME}] driver failed to start"
+            DESCRIPTION="The driver for the monitored UPS [${NAME}] is not running, so this system will NOT shut down on power loss. Check the SYSLOG."
+            LEVEL="alert"
+        fi
+        if [ -x /usr/local/emhttp/webGui/scripts/notify ]; then
+            timeout -s9 15 /usr/local/emhttp/webGui/scripts/notify -e "NUT" -s "$SUBJECT" -d "$DESCRIPTION" -i "$LEVEL" >/dev/null 2>&1
+        fi
+    fi
 }
 
 start_upsd() {
@@ -111,6 +207,12 @@ stop() {
             fi
         done
     fi
+
+    # on-battery workers and upssched timers must not outlive the services (a stale worker can still set FSD)
+    # anchored on the command line start: a bare substring would also kill e.g. an ssh or bash -c that merely mentions the path
+    pkill -f -- '^((/usr)?/bin/bash[[:space:]]+|bash[[:space:]]+)?/usr/sbin/nut-notify([[:space:]]|$)' 2>/dev/null
+    pkill -x upssched 2>/dev/null
+    rm -f /var/run/nut/upssched.pipe /var/run/nut/upssched.lock
 
     sleep 2
 
@@ -190,17 +292,21 @@ add_rc6_hook() {
     fi
 }
 
+# generate the NUT configuration files from the settings onto the flash drive
+# (or keep using a previous configuration whose imported settings await review)
+generate_config() {
+    if ! /usr/bin/php $DOCROOT/scripts/managed_config write; then
+        echo "ERROR: The NUT settings are invalid, so the NUT configuration was not updated and NUT will not start."
+        echo "ERROR: Correct the problems shown on the NUT Settings page."
+        return 1
+    fi
+}
+
 write_config() {
     echo "Writing NUT configuration..."
     local RETVAL=0
 
-    # generate the NUT configuration files from the settings onto the flash drive
-    # (or keep using a previous configuration whose imported settings await review)
-    if ! /usr/bin/php $DOCROOT/scripts/managed_config write; then
-        echo "ERROR: The NUT settings are invalid, so the NUT configuration was not updated and NUT will not start."
-        echo "ERROR: Correct the problems shown on the NUT Settings page."
-        RETVAL=1
-    fi
+    generate_config || RETVAL=1
 
     # the flash drive holds the generated files and any user files (e.g. xnut-notify-hooks.sh)
     mkdir -p /etc/nut
@@ -365,17 +471,238 @@ write_config() {
         sleep 1
     fi
 
+    write_batttest_cron
+
     # NUT Runtime Statistics Module
     /etc/rc.d/rc.nutstats check
 
     return $RETVAL
 }
 
+# UPS names to power off: the configured UPS plus every UPS that upsmon.conf monitors with a power value above 0 on this
+# system's own upsd (legacy redundant setups, any role). A monitor counts only when the upsd.conf in use shows that upsd
+# listens on every address the monitor can reach: same address family, same port. Another daemon could hold the rest.
+# Current NUT sets IPV6_V6ONLY and knows "LISTEN *"; NUT 2.7.4 (the legacy backend) does neither and binds the LISTEN lines
+# last to first, a failed bind only being logged. Only what holds for both is credited:
+#   * IPv4, that is 127.0.0.1 and [::ffff:127.0.0.1] (reaches it): a LISTEN of 127.0.0.1 or 0.0.0.0 on its port.
+#   * IPv6, [::1]: a LISTEN of ::1, or of :: when no other LISTEN of its port follows it (2.7.4 binds it before those,
+#     afterwards the bind of :: fails). :: is never credited with IPv4 (2.7.4 on Linux accepts it there), "LISTEN *" (fatal
+#     on 2.7.4) and an IPv4-mapped LISTEN (not bindable with IPV6_V6ONLY) with nothing at all.
+#   * localhost may resolve to either family and the client keeps the first that answers, so it counts only when both
+#     families listen on its port. "LISTEN localhost" binds one address of a family nobody can tell: it covers nothing.
+#   * Without any LISTEN line upsd listens on 127.0.0.1 and ::1, port 3493 (and so without a port). A LISTEN line that is
+#     not understood, or an upsd.conf that cannot be read, adds no listener and the defaults are not assumed either.
+#   * Everything else belongs to another daemon: other hosts, other ports, bare "::1" (upsmon rejects it, brackets are
+#     required), ports outside 1-65535, LISTEN or MONITOR in another case (upsd and upsmon match them exactly).
+# UPSes with power value 0 are only watched and stay on. A loopback monitor with a power value that is skipped is logged,
+# unless it is the configured UPS, which is powered off anyway. The identity comes from the configuration, no socket is probed.
+# Both files are read the way NUT's parseconf (the same in 2.7.4 and current NUT) reads them: byte by byte, never line by line.
+#   * A backslash makes the next byte literal; before a newline it joins the next physical line to the same word with nothing in
+#     between ("127.0.0.\<nl>1", also inside quotes). A comment ends at its newline, whatever that newline follows.
+#   * Only a newline is dropped after a backslash: before CR LF the backslash escapes the CR, so the LF still ends the line. An
+#     unescaped newline inside quotes is dropped too: a quote left open swallows the lines that follow it.
+#   * Only the bytes 0x20-0x7f stay in a word; whitespace splits words, "=" is a word of its own.
+# What is cut off or read differently by NUT versions is not guessed: a line that ends inside quotes or after a backslash at
+# the end of the file, or holds a # inside quotes (an error up to NUT 2.8.4, a literal character since, and what follows depends
+# on it, so the rest of that file is not trusted) is skipped and logged without its text. In upsd.conf such a line counts as a
+# LISTEN that is not understood: the defaults are not assumed and a "::" before it is credited with nothing, as the line may
+# be a LISTEN of the same port.
+# NUT retains at most 32 words per logical line and 512 bytes per word.
+monitored_power_ups() {
+    local upsd_conf=/etc/nut/upsd.conf
+    {
+        # no file: NUT's defaults. A file that cannot be read: the listeners are unknown
+        if [ -e "$upsd_conf" ] || [ -L "$upsd_conf" ]; then cat "$upsd_conf" 2>/dev/null || printf '\nLISTEN unreadable\n'; fi
+        # no newline before the marker: it sits right behind the last byte of upsd.conf, which keeps the end of that file visible
+        printf '\001@@UPSMON@@\n'; cat /etc/nut/upsmon.conf 2>/dev/null
+    } | LC_ALL=C awk -v primary="$NAME" '
+    function add(ch) { if (ch !~ BAD && length(cur) < 512) cur = cur ch }
+    function endword() { if (nw < 32) w[++nw] = cur; cur = "" }
+    # parseconf one byte at a time. st: 0 before a word, 1 in a word, 2 after a backslash in a word, 3 in quotes,
+    # 4 after a backslash in quotes, 5 in a comment. Finished words are w[1..nw]; cont: the last byte was a joined newline.
+    function step(ch) {
+        cont = 0
+        if (st == 0) {
+            if (ch == "\n") dispatch()
+            else if (ch == "#") st = 5
+            else if (ch ~ /[ \t\r\f\v]/) st = 0
+            else if (ch == "\\") st = 2
+            else if (ch == "\"") st = 3
+            else { add(ch); if (ch == "=") endword(); else st = 1 }
+        } else if (st == 1) {
+            if (ch == "#") { endword(); st = 5 }
+            else if (ch == "\n") { endword(); dispatch() }
+            else if (ch ~ /[ \t\r\f\v]/) { endword(); st = 0 }
+            else if (ch == "=") { endword(); add(ch); endword(); st = 0 }
+            else if (ch == "\\") st = 2
+            else add(ch)
+        } else if (st == 2) {
+            if (ch == "\n") cont = 1; else add(ch)
+            st = 1
+        } else if (st == 3) {
+            if (ch == "\"") { endword(); st = 0 }
+            else if (ch == "\\") st = 4
+            else if (ch == "#") hashquote()
+            else add(ch)
+        } else if (st == 4) {
+            if (ch != "\n") add(ch)
+            st = 3
+        } else if (ch == "\n") dispatch()
+    }
+    function feed(s,    i, n) {
+        n = length(s)
+        for (i = 1; i <= n && !skip; i++) step(substr(s, i, 1))
+    }
+    # a logical line is complete
+    function dispatch() {
+        if (nw) { if (part) monitor(); else listen() }
+        nw = 0; cur = ""; st = 0; lstart = ln + 1
+    }
+    # a line that cannot be trusted: never a MONITOR, in upsd.conf a LISTEN that adds no listener and hides what follows it
+    function malformed(why,    f) {
+        if (!part) { nlisten++; unk = nlisten }
+        f = (part ? "upsmon.conf" : "upsd.conf")
+        print "WARNING: " f " line " lstart ": " why | warn
+        nw = 0; cur = ""; st = 0
+    }
+    function hashquote() {
+        malformed("a # inside quotes is read differently by different NUT versions, ignoring the rest of the file")
+        skip = 1
+    }
+    # the end of a file: a line still inside quotes or behind a backslash is cut off
+    function endfile(    p) {
+        if (!skip && (st == 2 || st == 3 || st == 4 || cont)) malformed("the line is cut off inside quotes or after a backslash, ignoring it")
+        if (!part) {
+            if (!nlisten) l4[3493] = l6[3493] = 1
+            for (p in any6) if (any6[p] > other[p] && any6[p] > unk) l6[p] = 1
+        }
+        part = 1; skip = 0; ln = 0; lstart = 1; nw = 0; cur = ""; st = 0; cont = 0
+    }
+    function okport(p) { return p ~ /^[0-9]+$/ && p + 0 >= 1 && p + 0 <= 65535 }
+    # An IPv6 literal as eight hex groups without leading zeros in g[1..8] ("::" and a dotted-quad tail expanded); 0 if it is none.
+    function v6(a,    c, q, o, i, h, r, nh, nr, H, R) {
+        a = tolower(a)
+        if (a !~ /:/ || a !~ /^[0-9a-f:.]+$/ || a ~ /:::/) return 0
+        if (index(a, ".")) {
+            q = a; sub(/^.*:/, "", q)
+            if (split(q, o, ".") != 4) return 0
+            for (i = 1; i <= 4; i++) if (o[i] !~ /^(0|[1-9][0-9]*)$/ || o[i] + 0 > 255) return 0
+            a = substr(a, 1, length(a) - length(q)) sprintf("%x:%x", o[1] * 256 + o[2], o[3] * 256 + o[4])
+        }
+        c = index(a, "::")
+        if (c) {
+            h = substr(a, 1, c - 1); r = substr(a, c + 2)
+            if (index(r, "::")) return 0
+            nh = (h == "" ? 0 : split(h, H, ":")); nr = (r == "" ? 0 : split(r, R, ":"))
+            if (nh + nr > 7) return 0
+            for (i = 1; i <= 8; i++) g[i] = "0"
+            for (i = 1; i <= nh; i++) g[i] = H[i]
+            for (i = 1; i <= nr; i++) g[8 - nr + i] = R[i]
+        } else if (split(a, g, ":") != 8) return 0
+        for (i = 1; i <= 8; i++) {
+            if (g[i] !~ /^[0-9a-f][0-9a-f]?[0-9a-f]?[0-9a-f]?$/) return 0
+            sub(/^0+/, "", g[i]); if (g[i] == "") g[i] = "0"
+        }
+        return 1
+    }
+    # "any" for ::, "loop" for ::1, "m4" for ::ffff:127.0.0.1, "" for any other string
+    function v6kind(a,    i, s) {
+        if (!v6(a)) return ""
+        for (i = 1; i <= 8; i++) s = s g[i] ":"
+        if (s == "0:0:0:0:0:0:0:0:") return "any"
+        if (s == "0:0:0:0:0:0:0:1:") return "loop"
+        if (s == "0:0:0:0:0:ffff:7f00:1:") return "m4"
+        return ""
+    }
+    # 1 when the host[:port] of a MONITOR system can only reach the upsd of this system; loopish: it is a loopback address
+    function ours(hp,    host, port, c, k) {
+        loopish = 0; hp = tolower(hp); port = 3493
+        if (hp ~ /^\[/) {
+            c = index(hp, "]")
+            if (!c) return 0
+            host = substr(hp, 2, c - 2)
+            if (c < length(hp)) { if (substr(hp, c + 1, 1) != ":") return 0; port = substr(hp, c + 2) }
+        } else if ((c = index(hp, ":"))) {
+            host = substr(hp, 1, c - 1); port = substr(hp, c + 1)
+        } else host = hp
+        if (!okport(port)) return 0
+        port += 0
+        if (host == "127.0.0.1") { loopish = 1; return (port in l4) }
+        if (host == "localhost") { loopish = 1; return (port in l4) && (port in l6) }
+        k = v6kind(host)
+        if (k == "loop") { loopish = 1; return (port in l6) }
+        if (k == "m4") { loopish = 1; return (port in l4) }
+        return 0
+    }
+    function listen(    lp, a, k) {
+        if (w[1] != "LISTEN") return
+        nlisten++
+        if (nw < 2) return
+        lp = (nw >= 3 ? w[3] : 3493)
+        if (!okport(lp)) return
+        lp += 0; a = tolower(w[2]); k = v6kind(a)
+        if (a == "127.0.0.1" || a == "0.0.0.0") l4[lp] = 1
+        if (k == "loop") l6[lp] = 1
+        if (k == "any") any6[lp] = nlisten
+        if (k != "loop" && k != "any") other[lp] = nlisten
+    }
+    function monitor(    key, value, pv) {
+        if (nw < 6 || w[1] != "MONITOR") return
+        # upsmon parses power with strtol; values outside the common signed range are unsafe across NUT versions.
+        pv = match(w[3], /^[ \t]*[+-]?[0-9]+/) ? substr(w[3], 1, RLENGTH) + 0 : 0
+        if (pv < 0) return
+        key = w[2]; value = (pv > 0 && pv <= 2147483647)
+        if (!(key in power)) { order[++nmon] = key; power[key] = value; powertext[key] = w[3] }
+        if (pv > 2147483647 || power[key] != value) ambiguous[key] = 1
+    }
+    function emit_monitors(    i, key, target, at, nm, sys) {
+        for (i = 1; i <= nmon; i++) {
+            key = order[i]
+            # upscli_splitname uses a 512-byte buffer including its terminating NUL.
+            target = substr(key, 1, 511); at = index(target, "@")
+            if (at < 2) continue
+            nm = substr(target, 1, at - 1); sys = substr(target, at + 1)
+            if (!ours(sys)) {
+                if (power[key] && loopish && nm != primary) print "WARNING: Not powering off UPS [" nm "]: its MONITOR system [" sys "] has power value " powertext[key] ", but upsd.conf does not show that this loopback address and port reach the local upsd (IPv4 and IPv6 are separate, localhost needs both). Use 127.0.0.1 or [::1] together with a matching LISTEN line." | warn
+            } else if (ambiguous[key]) {
+                if (nm != primary) print "WARNING: Not powering off UPS [" nm "]: MONITOR power values are invalid or conflicting." | warn
+            } else if (power[key]) print nm
+        }
+    }
+    BEGIN { warn = "logger -t rc.nut"; unk = 0; lstart = 1; BAD = "[^ -~" sprintf("%c", 127) "]" }
+    {
+        ln++
+        if (!part && (sep = index($0, "\001@@UPSMON@@"))) {
+            feed(substr($0, 1, sep - 1) (sep > 1 ? "\n" : ""))
+            endfile()
+        } else feed($0 "\n")
+    }
+    END { endfile(); emit_monitors(); close(warn) }'
+}
+
+# power off the UPS inverters; each name goes to upsdrvctl on its own, never an empty one (that would mean every driver)
+shutdown_ups() {
+    local ups rc=0 seen=" " monitored=()
+    mapfile -t monitored < <(monitored_power_ups)
+    for ups in "$NAME" "${monitored[@]}"; do
+        if ! [[ "$ups" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "ERROR: Cannot shut down the UPS: invalid UPS name [${ups}]." | logger -t "rc.nut"
+            rc=1
+            continue
+        fi
+        [[ "$seen" == *" $ups "* ]] && continue
+        seen="$seen$ups "
+        echo "NUT is shutting down the UPS inverter [${ups}]..."
+        # "--": a name with a leading hyphen is never read as an option
+        /usr/sbin/upsdrvctl -u root -- shutdown "$ups" || rc=1
+    done
+    return $rc
+}
+
 case "$1" in
-    shutdown) # shuts down the UPS driver
-        if [ -f /etc/nut/killpower ]; then
-            echo "NUT is shutting down the UPS inverter..."
-            /usr/sbin/upsdrvctl -u root shutdown
+    shutdown) # shuts down the UPS driver(s)
+        if [ -f /etc/nut/killpower ] && [ "$MODE" != "slave" ]; then
+            shutdown_ups || exit 1
         fi
         ;;
     start)  # starts everything (for a ups server box)
@@ -392,10 +719,9 @@ case "$1" in
         ;;
     stop) # stops all UPS-related daemons
         sleep 1
-        write_config
-        sleep 1
         stop
         sleep 1
+        write_config
         check_down
         ;;
     reload)
@@ -411,10 +737,12 @@ case "$1" in
         ;;
     restart)
         sleep 1
-        # keep the running services if the new configuration is invalid
-        write_config || error_at_start
+        # invalid settings keep the running services; /etc/nut still holds the files they were started with
+        generate_config || error_at_start
         sleep 1
-        stop
+        stop # with the old configuration: upsdrvctl stop must see the drivers that are running
+        sleep 1
+        write_config || error_at_start
         sleep 3
         start
         ;;
