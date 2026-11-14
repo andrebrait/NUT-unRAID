@@ -11,7 +11,7 @@
  *
  * Limitations: Linux only (/proc), needs flock/pgrep/pkill/timeout/tee/mkfifo. The no-data timeout runs on a
  * fake clock (a `sleep` function that advances $SECONDS), the cancellation, slow upssched and stale worker tests use real
- * time and take about 30 seconds. The script copies are path-rewritten, so a new absolute path in rc.nut or
+ * time and take about 45 seconds. The script copies are path-rewritten, so a new absolute path in rc.nut or
  * nut-notify that the rewrite does not know makes the harness stop instead of touching the host. upsmon, upsd
  * and the drivers are not run, only their call order and the configuration they would see are checked. */
 
@@ -172,7 +172,11 @@ if [ -e "$SB/ups.gen" ]; then cp "$SB/ups.gen" "$conf"; elif [ -e "$SB/driver.fa
 exit 0
 SH,
         'etc/rc.d/rc.nutstats' => 'echo "nutstats-$1" >> "$SB/events"',
-        'usr/local/emhttp/plugins/dynamix/scripts/notify' => 'echo "$@" >> "$SB/notify.calls"',
+        'usr/local/emhttp/plugins/dynamix/scripts/notify' => <<<'SH'
+echo "$@" >> "$SB/notify.calls"
+# Recovery during the shutdown notification exercises the final FSD check, not the asynchronous initial recovery probe.
+if [ "$RECOVER_ON_SHUTDOWN" = 1 ] && [[ "$*" == *"System Shutdown"* ]]; then echo OL > "$SB/upsc.ups.status"; fi
+SH,
         'usr/local/emhttp/webGui/scripts/notify' => 'echo "$@" >> "$SB/driver-notify.calls"',
     ];
     foreach ($stubs as $path => $body) {
@@ -314,8 +318,8 @@ check(!in_array('FSD', events($sb), true), 'no FSD after cancelling all workers'
 // ================= nut-notify: power that came back is rechecked right before FSD
 $sb = sb_new('recheck');
 sb_cfg($sb, ['TIMEOUT' => '3']);
-file_put_contents("$sb/upsc.ups.status", "OL\n");
-[$code] = notify_run($sb, 'ONBATT');
+file_put_contents("$sb/upsc.ups.status", "OB\n");
+[$code] = notify_run($sb, 'ONBATT', 'ups@127.0.0.1', ['RECOVER_ON_SHUTDOWN' => '1']);
 check($code === 0, 'the worker exits cleanly when power is back');
 check(!in_array('FSD', events($sb), true), 'no FSD when the UPS reports OL right before the point of no return');
 check(wait_log($sb, 'FSD cancelled', 1), 'the cancelled FSD is logged');
@@ -464,22 +468,30 @@ sleep(5); // longer than the busy upssched would have needed to deliver
 check(events($sb) === ['upssched UPSNAME=ups@127.0.0.1 TYPE=ONLINE'], 'only ONLINE reached upssched, the call of the cancelled worker never delivered: ' . implode(',', events($sb)));
 check(strpos(read_file($sb, 'notify.calls'), 'UPS On Battery') === false && !in_array('FSD', events($sb), true), 'no on-battery alert and no FSD after the cancel');
 
-// An on-battery event that is handled after ONLINE (a late start) leaves no upssched timer and sends no alert, but its worker
-// is never touched: it keeps its countdown, and only the check right before FSD ends it
+// ONLINE can finish before upsmon's asynchronously forked ONBATT handler starts. Two OL readings must retire that stale
+// countdown, not just its alert timer: a second outage before its expiry must get its own full shutdown interval.
 $sb = sb_new('late-onbatt');
-sb_cfg($sb, ['TIMEOUT' => '3', 'ONBATTDELAY' => '30']);
+sb_cfg($sb, ['TIMEOUT' => '8', 'ONBATTDELAY' => '30']);
 file_put_contents("$sb/upsc.ups.status", "OL\n");
 file_put_contents("$sb/etc/nut/xnut-notify-hooks.sh", "ONBATT() { echo ran > \"\$SB/onbatt-hook\"; }\n");
 notify_run($sb, 'ONLINE', 'ups@127.0.0.1', [], false);
 $late = worker($sb, 'ups@127.0.0.1', 'late');
-check(wait_log($sb, $monitoring, 1, 3), 'the late worker still starts its shutdown criteria');
-check(wait_for(fn() => !is_running($late), 10), 'the late worker ends by itself');
-check(log_count($sb, 'FSD cancelled') === 1 && !in_array('FSD', events($sb), true), 'its countdown ran and the check right before FSD saw power back');
-check(wait_for(fn() => sb_leftovers($sb) === [], 3), 'nothing of the late on-battery event is left running: ' . implode(' | ', sb_leftovers($sb)));
+check(wait_log($sb, $monitoring, 1, 3), 'the late worker starts its countdown without waiting for recovery checks');
+check(wait_for(fn() => !is_running($late), 4), 'two OL readings end the stale countdown before its eight-second expiry');
+check(log_count($sb, 'Shutdown criteria are now met') === 0 && !in_array('FSD', events($sb), true), 'verified recovery cancels the countdown, not merely the FSD at its expiry');
+check(wait_for(fn() => sb_leftovers($sb) === [], 1), 'nothing of the late on-battery event is left running: ' . implode(' | ', sb_leftovers($sb)));
 check(read_file($sb, 'upssched.calls') === "ONLINE\n" && events($sb) === ['upssched UPSNAME=ups@127.0.0.1 TYPE=ONLINE'], 'the late on-battery event starts no upssched timer: ' . implode(',', events($sb)));
 check(strpos(read_file($sb, 'notify.calls'), 'On Battery') === false && strpos(read_file($sb, 'wall'), 'on battery') === false, 'no on-battery alert after power is back');
 check(!file_exists("$sb/onbatt-hook"), 'a late on-battery event does not run the on-battery hook');
 check(log_count($sb, 'late on-battery event') === 1, 'the late event is logged');
+
+file_put_contents("$sb/upsc.ups.status", "OB DISCHRG\n");
+$secondAt = microtime(true);
+$second = worker($sb, 'ups@127.0.0.1', 'second-outage');
+check(wait_log($sb, $monitoring, 2, 3), 'the second outage starts a fresh countdown');
+check(wait_for(fn() => in_array('FSD', events($sb), true), 12), 'the second outage reaches FSD');
+check(microtime(true) - $secondAt >= 8, 'the second outage receives its full eight seconds, not the stale countdown remainder');
+check(finish($second, 10) === 0 && log_count($sb, 'Setting FSD') === 1, 'only the second outage sets FSD');
 
 // a status naming both OL and OB, or one OL reading that the next reading contradicts, is an outage, not a late event
 $sb = sb_new('late-ambiguous');
@@ -500,6 +512,23 @@ sort($ev);
 check($code === 0 && $ev === ['FSD', 'upssched UPSNAME=ups@127.0.0.1 TYPE=ONBATT'], 'a single OL reading does not skip upssched or cancel the FSD: ' . implode(',', events($sb)));
 check(log_count($sb, 'late on-battery event') === 0, 'a contradicted OL reading is not a late event');
 
+// Recovery checks are independent of upssched being configured and apply to every shutdown mode.
+$recoveries = [];
+foreach (['sec_timer', 'batt_level', 'batt_timer', 'none'] as $mode) {
+    $sb = sb_new("recover-$mode");
+    sb_cfg($sb, ['SHUTDOWN' => $mode, 'TIMEOUT' => '30']);
+    file_put_contents("$sb/upsc.ups.status", "OL\n");
+    file_put_contents("$sb/upsc.battery.charge", "90\n");
+    file_put_contents("$sb/upsc.battery.runtime", "900\n");
+    notify_run($sb, 'ONLINE', 'ups@127.0.0.1', [], false);
+    $recoveries[$mode] = [$sb, worker($sb, 'ups@127.0.0.1', 'late')];
+}
+foreach ($recoveries as $mode => [$sb, $p]) {
+    check(wait_for(fn() => !is_running($p), 4), "verified recovery ends the $mode worker without upssched");
+    check(events($sb) === [] && read_file($sb, 'upssched.calls') === '' && log_count($sb, 'Shutdown criteria are now met') === 0,
+        "recovery in $mode starts no upssched timer or shutdown: " . implode(',', events($sb)));
+}
+
 // a UPS name that starts with a hyphen is a name for upsc, not an option
 $sb = sb_new('hyphen');
 sb_cfg($sb, ['NAME' => '-lead', 'SHUTDOWN' => 'batt_level', 'BATTERYLEVEL' => '20']);
@@ -512,8 +541,8 @@ check(array_values(array_unique(array_filter(explode("\n", read_file($sb, 'upsc.
 
 $sb = sb_new('hyphen-online');
 sb_cfg($sb, ['NAME' => '-lead', 'TIMEOUT' => '2']);
-file_put_contents("$sb/upsc.ups.status", "OL\n");
-[$code] = notify_run($sb, 'ONBATT', '-lead@127.0.0.1');
+file_put_contents("$sb/upsc.ups.status", "OB\n");
+[$code] = notify_run($sb, 'ONBATT', '-lead@127.0.0.1', ['RECOVER_ON_SHUTDOWN' => '1']);
 check($code === 0 && events($sb) === [] && log_count($sb, 'FSD cancelled') === 1, 'the status of a hyphen-named UPS is rechecked before FSD: ' . implode(',', events($sb)));
 
 // ================= rc.nut: restart ordering

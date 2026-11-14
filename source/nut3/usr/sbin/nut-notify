@@ -108,14 +108,14 @@ power_is_back() {
     [[ "$s" == *" OL "* && "$s" != *" OB "* ]]
 }
 feed_upssched() {
-    [ -n "$UPSNAME" ] && { [ "$ONBATTDELAY" -gt 0 ] || [ "$EARLYSTAGE" -gt 0 ]; } \
-        && { [ "$NOTIFYTYPE" == "ONBATT" ] || [ "$NOTIFYTYPE" == "ONLINE" ]; } || return 0
-    # A late start (ONLINE was handled first) must not leave a timer behind: only two readings a second apart that both
-    # say power is back make it one. Any other reading is the outage it was reported as; the worker is never touched.
+    # upsmon forks notifications asynchronously: ONLINE may have cancelled before this worker started. Verify recovery beside
+    # the countdown (never delay it), even without upssched. One stale OL followed by OB must not cancel a real outage.
     if [ "$NOTIFYTYPE" == "ONBATT" ] && power_is_back 5 && { sleep 1; power_is_back 5; }; then
         LATE=1
         return 0
     fi
+    [ -n "$UPSNAME" ] && { [ "$ONBATTDELAY" -gt 0 ] || [ "$EARLYSTAGE" -gt 0 ]; } \
+        && { [ "$NOTIFYTYPE" == "ONBATT" ] || [ "$NOTIFYTYPE" == "ONLINE" ]; } || return 0
     # no inherited pipes: upssched may leave a background daemon behind; in the background so that a signal ends the wait at once
     timeout 15 /usr/sbin/upssched "$1" </dev/null >/dev/null 2>&1 &
     SCHED_PID=$!
@@ -178,6 +178,8 @@ then
 
             if [ "$LATE" == "1" ]; then
                 echo "[${UPS}] UPS power is already back, no alert or timer for this late on-battery event." | logger -t "nut-notify[$$]"
+                # LATE is local to this alert subshell; retire the parent countdown too, before another outage can reuse it.
+                kill -s SIGTERM "$$" 2>/dev/null
             elif [ "$DELAYALERT" == "1" ]; then
                 echo "[${UPS}] UPS is on battery (alert delayed by ${ONBATTDELAY}s). ${MESSAGE}" | logger -t "nut-notify[$$]"
             else
