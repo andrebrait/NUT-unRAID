@@ -156,7 +156,14 @@ if [ -f "$seq" ]; then
     awk -v n=$((n + 1)) 'NR == n { print; exit }' "$seq"
     exit 0
 fi
-[ -f "$SB/upsc.$var" ] && cat "$SB/upsc.$var"
+if [ -f "$SB/upsc.$var" ]; then
+    value=$(cat "$SB/upsc.$var")
+    printf '%s\n' "$value"
+    # Publish OB before releasing the shutdown notification's recovery injection.
+    if [ "$var" = ups.status ] && [ "$RECOVER_ON_SHUTDOWN" = 1 ] && [ "$value" = OB ]; then
+        echo sampled > "$SB/fifo"
+    fi
+fi
 exit 0
 SH,
         'usr/bin/php' => <<<'SH'
@@ -175,7 +182,10 @@ SH,
         'usr/local/emhttp/plugins/dynamix/scripts/notify' => <<<'SH'
 echo "$@" >> "$SB/notify.calls"
 # Recovery during the shutdown notification exercises the final FSD check, not the asynchronous initial recovery probe.
-if [ "$RECOVER_ON_SHUTDOWN" = 1 ] && [[ "$*" == *"System Shutdown"* ]]; then echo OL > "$SB/upsc.ups.status"; fi
+if [ "$RECOVER_ON_SHUTDOWN" = 1 ] && [[ "$*" == *"System Shutdown"* ]]; then
+    read -r sampled < "$SB/fifo" || exit 1
+    echo OL > "$SB/upsc.ups.status"
+fi
 SH,
         'usr/local/emhttp/webGui/scripts/notify' => 'echo "$@" >> "$SB/driver-notify.calls"',
     ];
