@@ -1,0 +1,24 @@
+#!/usr/bin/php
+<?php
+/* Copyright Andre Brait (as author of this file)
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License 2
+ * as published by the Free Software Foundation.
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * debug_redact: redact the credentials from every file of the debug package directory (see include/nut_redact.php)
+ */
+require_once __DIR__ . '/../include/nut_redact.php';
+
+if (count($argv) !== 3) {
+    fwrite(STDERR, "usage: debug_redact settings-file package-directory\n");
+    exit(2);
+}
+if (!nut_redact_dir($argv[2], nut_mc_settings(nut_mc_read_cfg($argv[1])))) {
+    echo "ERROR: redacting the debug package failed.\n";
+    exit(1);
+}
+exit(0);
