@@ -38,6 +38,8 @@ credentials, which never reach the browser. Without credentials, the page is dis
 Fresh installations and configuration resets generate separate random monitor and slave passwords.
 Upgrades preserve existing credentials. Netserver validation rejects the published legacy passwords
 `monpass`, `slavepass` and `adminpass`; replace them before applying or starting managed Netserver mode.
+For an existing generated Netserver configuration, the installer checks these credentials before stopping
+NUT and refuses the upgrade until they are changed. Monitoring therefore continues during remediation.
 Imported legacy files remain active until reviewed, including their existing network credentials.
 Rotate those credentials promptly when reviewing a Netserver import.
 
@@ -158,6 +160,8 @@ files without the generated header and no import report exists:
 
 1. The old files and `nut3.cfg` are backed up atomically to `backup/legacy/`. A failed backup or an
    existing backup with different contents aborts the import before settings are changed.
+   If only publication of the import report failed, a retry reconstructs the same import from the original
+   settings backup without losing manual-mode semantics or overwriting recovery data.
 2. Each file is tokenised. Recognised directives become settings. Everything else, comments excepted, goes
    verbatim into the custom field of that file. A recognised directive that repeats, or whose value the
    settings cannot express (an unknown MIB, `SHUTDOWNCMD` other than poweroff, `NOTIFYFLAG ONBATT` with other

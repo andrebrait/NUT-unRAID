@@ -43,6 +43,18 @@ try {
     check(!nut_mc_import_dir($dir), 'a conflicting backup aborts import instead of overwriting recovery data');
     check(file_get_contents("$dir/backup/legacy/ups.conf") === '[truncated' && file_get_contents("$dir/nut3.cfg") === $before, 'backup conflict preserves both versions for recovery');
 
+    $retry = "$dir/retry";
+    mkdir("$retry/ups", 0700, true);
+    $original = "MANUAL=\"enable\"\nNAME=\"ups\"\n";
+    file_put_contents("$retry/nut3.cfg", $original);
+    file_put_contents("$retry/ups/ups.conf", "[rack]\ndriver = usbhid-ups\nport = auto\n");
+    file_put_contents("$retry/ups/upsmon.conf", "MONITOR rack@127.0.0.1 1 observer unique-password master\n");
+    mkdir("$retry/import-report.json.tmp", 0700);
+    check(!@nut_mc_deploy($retry, $messages), 'a failed import report write is reported');
+    rmdir("$retry/import-report.json.tmp");
+    check(nut_mc_deploy($retry, $messages) && nut_mc_pending($retry) !== null, 'import recovers after a transient report write failure');
+    check(nut_mc_read_cfg("$retry/nut3.cfg")['NAME'] === 'rack' && file_get_contents("$retry/backup/legacy/nut3.cfg") === $original, 'retried import retains original manual-mode semantics and recovery settings');
+
     unlink("$dir/nut3.cfg");
     check(nut_mc_initialize($dir), 'fresh installation creates settings');
     $first = nut_mc_read_cfg("$dir/nut3.cfg");

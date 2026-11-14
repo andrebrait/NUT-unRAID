@@ -20,7 +20,7 @@ try {
     foreach (['include/nut_redact.php', 'include/nut_managed.php', 'scripts/debug_redact', 'default.cfg'] as $file) {
         if (is_file("$plugin/$file")) copy("$plugin/$file", "$dest/$file");
     }
-    $secret = 'custom/archive^secret';
+    $secret = 'custom/archive^hidden';
     $monitor = "MONITOR other@10.0.0.2 0 observer \"$secret\" slave\n";
     put("$root/etc/nut/upsmon.conf", $monitor);
     put("$root/boot/config/plugins/nut3/ups/upsmon.conf", $monitor);

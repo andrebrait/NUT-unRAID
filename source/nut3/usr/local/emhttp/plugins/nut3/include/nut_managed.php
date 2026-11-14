@@ -939,6 +939,7 @@ function nut_mc_is_legacy($dir = NUT_MC_DIR) {
 function nut_mc_import_dir($dir = NUT_MC_DIR) {
     $cfgPath = "$dir/nut3.cfg";
     $files = [];
+    $current = $original = nut_mc_read_cfg($cfgPath);
     if (!is_dir("$dir/backup/legacy") && !mkdir("$dir/backup/legacy", 0700, true)) return false;
     foreach (array_merge(NUT_MC_FILES, ['nut3.cfg']) as $name) {
         $source = $name === 'nut3.cfg' ? $cfgPath : "$dir/ups/$name";
@@ -948,12 +949,18 @@ function nut_mc_import_dir($dir = NUT_MC_DIR) {
         if ($text === null) continue;
         $backup = "$dir/backup/legacy/$name";
         if (is_file($backup)) {
-            if (file_get_contents($backup) !== $text) return false;
+            if ($name === 'nut3.cfg') {
+                $original = nut_mc_read_cfg($backup);
+            } elseif (file_get_contents($backup) !== $text) {
+                return false;
+            }
         } elseif (!nut_mc_put($backup, $text)) {
             return false;
         }
     }
-    [$cfg, $notes] = nut_mc_import(nut_mc_read_cfg($cfgPath), $files);
+    // A report write may fail after the imported settings reached disk; replay from the original settings on retry.
+    [$cfg, $notes] = nut_mc_import($original, $files);
+    if ($current !== $original && $current !== $cfg) return false;
     return nut_mc_write_cfg($cfgPath, $cfg)
         && nut_mc_put("$dir/import-report.json", json_encode(['date' => date('Y-m-d H:i'), 'notes' => $notes], JSON_PRETTY_PRINT) . "\n");
 }
