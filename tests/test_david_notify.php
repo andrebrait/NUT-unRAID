@@ -614,12 +614,12 @@ MONITOR lookalike@localhost.example.com 1 monuser pw master
 MONITOR tunnel@127.0.0.1.example.com 1 monuser pw master
 MONITOR short@localhost 1 monuser pw
 MONITOR badpower@localhost many monuser pw master
-MONITOR broken@localhost 1 monuser "pw master
 MONITOR @localhost 1 monuser pw master
 monitor lowercase@localhost 1 monuser pw master   # upsmon matches directives exactly, it ignores this line
 MONITOR bare6@::1 1 monuser pw master             # upsmon cannot split an IPv6 host without brackets
 #MONITOR commented@localhost 1 monuser pw master
 NOTIFYFLAG ONBATT SYSLOG+EXEC
+MONITOR broken@localhost 1 monuser "pw master
 CONF);
 $all = ['drvctl-shutdown primary', 'drvctl-shutdown second', 'drvctl-shutdown third', 'drvctl-shutdown fourth', 'drvctl-shutdown fifth'];
 [$code] = rc($sb, 'shutdown');
@@ -711,6 +711,28 @@ $listen = [
     'port zero' => ["LISTEN 127.0.0.1 0\n", []],
     'port above 65535' => ["LISTEN 127.0.0.1 65536\n", []],
     'line with extra words' => ["LISTEN 127.0.0.1 3494 extra\n", []],
+    // parseconf reads logical lines: a backslash before a newline joins the next physical line to the same word, with nothing in between
+    'a backslash joins the lines inside the address' => ["LISTEN 127.0.\\\n0.1\n", ['v4', 'mapped']],
+    'a backslash joins the lines inside the port' => ["LISTEN 127.0.0.1 349\\\n4\n", ['v4p', 'mappedp']],
+    'a backslash between the words continues the line' => ["LISTEN 127.0.0.1 \\\n3494\n", ['v4p', 'mappedp']],
+    'blanks after the continuation make an empty word, the line is not understood' => ["LISTEN 127.0.0.1 \\\n 3494\n", []],
+    'a backslash joins the lines inside quotes' => ["LISTEN \"127.0.0.1\" \"349\\\n4\"\n", ['v4p', 'mappedp']],
+    'quoted address and port' => ["LISTEN \"127.0.0.1\" \"3494\"\n", ['v4p', 'mappedp']],
+    'an escaped backslash is no continuation' => ["LISTEN 127.0.0.1 3494\\\\\nLISTEN ::1 3494\n", ['v6p']],
+    'an escaped backslash in quotes leaves the closing quote alone' => ["LISTEN \"0.0.0.0\\\\\" 3494\nLISTEN 127.0.0.1 3494\n", ['v4p', 'mappedp']],
+    'a backslash at the end of a comment does not continue it' => ["LISTEN 127.0.0.1 # note \\\nLISTEN ::1\n", $default],
+    'CR LF ends the lines' => ["LISTEN 127.0.0.1 3494\r\nLISTEN ::1 3494\r\n", ['v4p', 'v6p', 'namep', 'mappedp']],
+    'a backslash before CR LF escapes the CR, the LF still ends the line' => ["LISTEN 127.0.0.1\\\r\n3494\r\n", ['v4', 'mapped']],
+    'the same after a blank: an empty word, the line is not understood' => ["LISTEN 127.0.0.1 \\\r\n3494\r\n", []],
+    'a quote closed on a later line takes the lines in between along' => ["MAXAGE \"15\nLISTEN 127.0.0.1 3494\n\"\nLISTEN ::1 3494\n", ['v6p']],
+    // cut off or read differently by NUT versions: credited with nothing, and it is a LISTEN that is not understood, never "no LISTEN"
+    'a continuation cut off by the end of the file' => ["LISTEN 127.0.0.1 3494\\\n", []],
+    'a backslash at the very end of the file' => ["LISTEN 127.0.0.1 3494\\", []],
+    'a quote left open at the end of the file' => ["LISTEN 127.0.0.1 \"3494\n", []],
+    'an open quote in another directive is not "no LISTEN" either' => ["MAXAGE \"15\n", []],
+    'a cut off LISTEN keeps the lines before it' => ["LISTEN 127.0.0.1 3494\nLISTEN ::1 3494 \\\n", ['v4p', 'mappedp']],
+    'a # inside quotes cannot be trusted, nor can the rest of the file' => ["LISTEN \"127.0.0.1\" 3494\nLISTEN \"::1#\" 3494\nLISTEN 127.0.0.1\n", ['v4p', 'mappedp']],
+    ':: before a line that cannot be trusted counts as nothing, the line may be a LISTEN of its port' => ["LISTEN ::\nLISTEN \"0.0.0.0#\"\n", []],
     'an upsd.conf that cannot be read' => [false, []],
 ];
 foreach ($listen as $case => [$upsd, $names]) {
@@ -727,6 +749,103 @@ foreach ($listen as $case => [$upsd, $names]) {
     // all eight loopback monitors carry a power value: each one that is not powered off is logged
     check(log_count($sb, 'Not powering off UPS') === count($order) - count($names), "$case: every skipped loopback monitor is logged, got " . log_count($sb, 'Not powering off UPS'));
 }
+
+// upsmon.conf is read in logical lines as well. Monitors cut off or read differently by NUT versions are never powered off and
+// reported by line number only (the line holds the password).
+$sb = sb_new('killpower-logical');
+sb_cfg($sb, ['NAME' => 'primary']);
+touch("$sb/etc/nut/killpower");
+$logical = [
+    'continuations, comments, escapes and CR LF' => [implode('', [
+        "MONITOR split@127.0.0.\\\n1 1 monuser pw master\n",              // joined inside a word
+        "MONITOR \"quoted@local\\\nhost\" 1 monuser pw master\n",         // joined inside quotes
+        "MONITOR between@localhost \\\n1 monuser pw master\n",            // joined between words
+        "MONITOR comment@localhost 1 monuser pw master # note \\\n",      // a comment never continues
+        "MONITOR after@localhost 1 monuser pw master\n",
+        "MONITOR escaped@localhost 1 monuser pw\\\\\n",                   // an escaped backslash: five words, no join
+        "MONITOR next@localhost 1 monuser pw master\n",
+        "MONITOR quotedpw@localhost 1 monuser \"p\\\\\" master\n",         // the escaped backslash leaves the closing quote alone
+        "MONITOR lastquoted@localhost 1 monuser pw master\n",
+        "MONITOR crlf@127.0.0.1 1 monuser pw master\r\n",
+        "MONITOR crlfcont@127.0.0.1 1 monuser pw master\\\r\n",           // the backslash escapes the CR: the LF ends the line
+        "MONITOR crlfnext@127.0.0.1 1 monuser pw master\r\n",
+    ]), ['split', 'quoted', 'between', 'comment', 'after', 'next', 'quotedpw', 'lastquoted', 'crlf', 'crlfcont', 'crlfnext'], null],
+    'a quote closed on a later line takes the lines in between along' => [
+        "MONITOR a@localhost 1 monuser \"pw master\nMONITOR b@localhost 1 monuser pw master\n\" master\nMONITOR c@localhost 1 monuser pw master\n",
+        ['a', 'c'], null],
+    'a quote left open at the end of the file' => [
+        "MONITOR ok@localhost 1 monuser pw master\nMONITOR a@localhost 1 monuser \"pw master\nMONITOR b@localhost 1 monuser pw master\n",
+        ['ok'], 2],
+    'a continuation cut off by the end of the file' => ["MONITOR ok@localhost 1 monuser pw master\nMONITOR cut@localhost 1 monuser pw \\\n", ['ok'], 2],
+    'a backslash at the very end of the file' => ["MONITOR ok@localhost 1 monuser pw master\nMONITOR cut@localhost 1 monuser pw master\\", ['ok'], 2],
+    'a # inside quotes cannot be trusted, nor can the rest of the file' => [
+        "MONITOR before@localhost 1 monuser pw master\nMONITOR hash@localhost 1 monuser \"p#w\" master\nMONITOR after@localhost 1 monuser pw master\n",
+        ['before'], 2],
+];
+foreach ($logical as $case => [$conf, $names, $warnLine]) {
+    file_put_contents("$sb/etc/nut/upsmon.conf", $conf);
+    file_put_contents("$sb/events", '');
+    file_put_contents("$sb/log", '');
+    [$code] = rc($sb, 'shutdown');
+    $expected = array_map(fn($name) => "drvctl-shutdown $name", array_merge(['primary'], $names));
+    check($code === 0 && events($sb) === $expected, "$case: expected " . implode(',', $expected) . ' got ' . implode(',', events($sb)));
+    check(log_count($sb, 'WARNING: upsmon.conf line') === ($warnLine === null ? 0 : 1)
+        && ($warnLine === null || log_count($sb, "rc.nut: WARNING: upsmon.conf line $warnLine:") === 1), "$case: reported once at the first line of the problem: " . read_file($sb, 'log'));
+    check(strpos(read_file($sb, 'log'), 'p#w') === false, "$case: the text of a skipped line never reaches the log");
+}
+
+// NUT truncates a word at 512 bytes; the full UPS target must not be treated as local after truncation.
+$sb = sb_new('killpower-long-target');
+sb_cfg($sb, ['NAME' => 'primary']);
+touch("$sb/etc/nut/killpower");
+$longName = str_repeat('x', 503);
+file_put_contents("$sb/etc/nut/upsd.conf", "LISTEN 127.0.0.1\n");
+file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR $longName@127.0.0.1 1 monuser pw master\n");
+[$code] = rc($sb, 'shutdown');
+check($code === 0 && events($sb) === ['drvctl-shutdown primary'], 'a monitor target truncated by NUT must not power off the full-name UPS');
+foreach ([501 => true, 502 => false] as $length => $local) {
+    $name = str_repeat('x', $length);
+    file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR $name@127.0.0.1 1 monuser pw master\n");
+    file_put_contents("$sb/events", '');
+    [$code] = rc($sb, 'shutdown');
+    $expected = $local ? ['drvctl-shutdown primary', "drvctl-shutdown $name"] : ['drvctl-shutdown primary'];
+    check($code === 0 && events($sb) === $expected, "a monitor target with $length name bytes respects upsclient's 511-byte limit");
+}
+
+// Conflicting duplicates may resolve differently on start and reload; never power off that UPS.
+foreach (["0\n1", "1\n0", "1\n4294967296", "4294967296\n1"] as $powers) {
+    [$first, $second] = explode("\n", $powers);
+    file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR spare@127.0.0.1 $first u p slave\nMONITOR spare@127.0.0.1 $second u p slave\n");
+    file_put_contents("$sb/events", '');
+    [$code] = rc($sb, 'shutdown');
+    check($code === 0 && events($sb) === ['drvctl-shutdown primary'], "conflicting monitor power values $first/$second do not power off the UPS");
+}
+file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR spare@127.0.0.1 -1 u p slave\nMONITOR spare@127.0.0.1 1 u p slave\n");
+file_put_contents("$sb/events", '');
+[$code] = rc($sb, 'shutdown');
+check($code === 0 && events($sb) === ['drvctl-shutdown primary', 'drvctl-shutdown spare'], 'a negative power value ignored by upsmon does not suppress a valid monitor');
+foreach (['0.5', '+inf', '2147483648'] as $invalidPower) {
+    file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR spare@127.0.0.1 $invalidPower u p slave\n");
+    file_put_contents("$sb/events", '');
+    [$code] = rc($sb, 'shutdown');
+    check($code === 0 && events($sb) === ['drvctl-shutdown primary'], "a NUT power value of $invalidPower must not power off an unmonitored UPS");
+}
+foreach (['01', '+1'] as $validPower) {
+    file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR spare@127.0.0.1 $validPower u p slave\n");
+    file_put_contents("$sb/events", '');
+    [$code] = rc($sb, 'shutdown');
+    check($code === 0 && events($sb) === ['drvctl-shutdown primary', 'drvctl-shutdown spare'], "NUT power value $validPower remains power-bearing");
+}
+
+// the danger: a LISTEN that is cut off must not turn into "no LISTEN", whose defaults would claim the unrelated UPS on port 3493
+$sb = sb_new('killpower-cut-listen');
+sb_cfg($sb, ['NAME' => 'primary']);
+touch("$sb/etc/nut/killpower");
+file_put_contents("$sb/etc/nut/upsd.conf", "LISTEN 127.0.0.1 3494\\\n");
+file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR unrelated@127.0.0.1 1 monuser pw master\nMONITOR cut@127.0.0.1:3494 1 monuser pw master\n");
+[$code] = rc($sb, 'shutdown');
+check($code === 0 && events($sb) === ['drvctl-shutdown primary'], 'a cut off LISTEN powers off no monitor, and never the default port\'s UPS: ' . implode(' | ', events($sb)));
+check(log_count($sb, 'rc.nut: WARNING: upsd.conf line 1:') === 1 && log_count($sb, 'Not powering off UPS') === 2, 'the cut off LISTEN and both skipped monitors are logged: ' . read_file($sb, 'log'));
 
 // the shipped legacy configurations through the real rc.nut: the family and port of the LISTEN lines decide for the
 // monitors that were added to their upsmon.conf (the legacy monitor of the UPS itself is the configured UPS)

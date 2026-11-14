@@ -219,21 +219,34 @@ function nut_mc_listen_families(array $c) {
     return $families;
 }
 
+/* The loopback host ("host[:port]") of a MONITOR system: [families it needs (4, 6), port (default 3493), true for a bare IPv6
+ * address], null for any other host. A bracketed host is an IP literal in any spelling, [::1], [0:0:0:0:0:0:0:1], [::ffff:127.0.0.1],
+ * [::ffff:7f00:1] or [127.0.0.1], as upsclient's splitaddr unwraps it for getaddrinfo; upsmon rejects a bare IPv6 address
+ * (no brackets, so no port), an old file may still hold one. 127.0.0.1 and IPv4-mapped 127.0.0.1 need IPv4, ::1 needs IPv6,
+ * localhost may be either and needs both. */
+function nut_mc_loopback_host($host) {
+    $port = 3493;
+    $bare = !preg_match('/^(?:\[([0-9a-f:.]+)\]|(127\.0\.0\.1|localhost))(?::([0-9]+))?$/i', $host, $m);
+    $address = $bare ? $host : ($m[1] !== '' ? $m[1] : $m[2]);
+    if (isset($m[3])) $port = (int)$m[3];
+    $ip = @inet_pton($address);
+    if (!$bare && strcasecmp($address, 'localhost') === 0) return [[4, 6], $port, false];
+    if ($ip === "\x7f\0\0\1" || $ip === str_repeat("\0", 10) . "\xff\xff\x7f\0\0\1") return [[4], $port, $bare];
+    if ($ip === str_repeat("\0", 15) . "\1") return [[6], $port, $bare];
+    return null;
+}
+
 /* UPS name of a MONITOR system ("name@host[:port]") that looks like this machine's loopback, null for any other system.
  * With $families (nut_mc_listen_families), only a system that certainly reaches the generated upsd counts, as in rc.nut's
- * monitored_power_ups: port 3493 and every family its host can resolve to listened on. 127.0.0.1 and [::ffff:127.0.0.1]
- * need IPv4, [::1] needs IPv6, localhost may be either and needs both; a bare ::1 is rejected by upsmon. Without $families
- * any loopback spelling on any port counts, which only tells the lines of another UPS apart. */
+ * monitored_power_ups: bracketed or plain host (see nut_mc_loopback_host), port 3493 and every family the host can resolve
+ * to listened on. Without $families any loopback spelling on any port, a bare IPv6 address included, counts, which only
+ * tells the lines of another UPS apart. */
 function nut_mc_local_ups($system, ?array $families = null) {
     [$name, $host] = array_pad(explode('@', (string)$system, 2), 2, '');
-    if ($families === null) return preg_match('/^(?:(?:127\.0\.0\.1|localhost|\[::1\])(?::[0-9]+)?|::1)$/i', $host) ? $name : null;
-    if (!preg_match('/^(?:(127\.0\.0\.1|localhost)|\[([0-9a-f:.]+)\])(?::([0-9]+))?$/i', $host, $m) || (int)($m[3] ?? 3493) !== 3493) return null;
-    $ip = $m[1] === '' ? @inet_pton($m[2]) : false;
-    if (strtolower($m[1]) === 'localhost') $need = [4, 6];
-    elseif ($m[1] !== '' || $ip === "\x7f\0\0\1" || $ip === str_repeat("\0", 10) . "\xff\xff\x7f\0\0\1") $need = [4];
-    elseif ($ip === str_repeat("\0", 15) . "\1") $need = [6];
-    else return null;
-    return array_diff($need, array_keys($families)) ? null : $name;
+    $loopback = nut_mc_loopback_host($host);
+    if ($loopback === null) return null;
+    [$need, $port, $bare] = $loopback;
+    return $families === null || (!$bare && $port === 3493 && !array_diff($need, array_keys($families))) ? $name : null;
 }
 
 function nut_mc_generate(array $c, $withCustom = true) {

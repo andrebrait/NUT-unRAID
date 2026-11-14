@@ -103,6 +103,7 @@ Exclusions, because current NUT and the legacy 2.7.4 backend differ:
   `LISTEN` line upsd listens on `127.0.0.1` and `::1`, port 3493. `LISTEN` and `MONITOR` count in upper case only,
   as for upsd and upsmon.
 - The configuration decides, no socket is probed: another daemon that holds a port upsd failed to bind is not detected.
+- Duplicate `MONITOR` entries for the same system with conflicting power values are skipped, because NUT may use different values after a reload. An unescaped `#` inside quotes makes the rest of that file unavailable for power-off matching because supported NUT versions interpret it differently.
 
 A skipped monitor of a loopback address with a power value above 0 is logged to syslog by `rc.nut` (`Not powering off
 UPS [name]`), except for the configured UPS, which is powered off anyway. To fix it, write `127.0.0.1` or `[::1]`

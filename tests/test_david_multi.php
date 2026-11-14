@@ -152,6 +152,24 @@ foreach ([
 check(nut_mc_local_ups('spare@127.0.0.1:3494') === 'spare' && nut_mc_local_ups('spare@::1') === 'spare' && nut_mc_local_ups('spare@localhost') === 'spare'
     && nut_mc_local_ups('spare@10.0.0.2:3493') === null && nut_mc_local_ups('spare@::1:3493') === null && nut_mc_local_ups('spare@[::1') === null && nut_mc_local_ups('spare@::1]') === null,
     'any loopback spelling counts as a loopback line, other hosts and malformed addresses never');
+// every loopback spelling is a loopback line on any port, and the relaxed matcher never misses what the strict one accepts
+// (the default port with the families the host resolves to): [::ffff:127.0.0.1] is as much this machine as 127.0.0.1
+foreach (['127.0.0.1', '[127.0.0.1]', 'localhost', 'LocalHost', '[::1]', '[0:0:0:0:0:0:0:1]', '[0::1]', '[::0001]', '[::ffff:127.0.0.1]', '[::FFFF:7F00:1]', '[0:0:0:0:0:ffff:7f00:1]'] as $host) {
+    foreach (['', ':3493', ':03493', ':3494', ':9'] as $port) {
+        $system = "spare@$host$port";
+        check(nut_mc_local_ups($system) === 'spare', "$system is a loopback line on any port");
+        check(nut_mc_local_ups($system, $both) === (in_array($port, ['', ':3493', ':03493'], true) ? 'spare' : null), "$system reaches the generated upsd only on the default port");
+    }
+}
+// a bare IPv6 address has no port and upsmon rejects it: only the relaxed matcher, which tells the lines of other UPSes apart, knows it
+foreach (['::1', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1', '::FFFF:7f00:1'] as $host) {
+    check(nut_mc_local_ups("spare@$host") === 'spare' && nut_mc_local_ups("spare@$host", $both) === null, "a bare $host is a loopback line, but never a certain one");
+}
+// no other host, malformed address, address with a port suffix or non-loopback IPv6 is a loopback line
+foreach (['[::ffff:127.0.0.2]', '[::ffff:127.0.0.2]:3493', '[::ffff:127.0.0.1.5]', '[::ffff:127.0.0.256]', '[::ffff:127.0.0]', '[::ffff:10.0.0.1]', '[::ffff:0:127.0.0.1]', '[::1::]', '[::1::]:3493',
+    '[:::1]', '[::1]:', '[::1]:abc', '[::1]x', '[::1]::3493', '[::1][::1]', '[::1%lo]', '[]', '[::2]', '[localhost]', ' [::1]', '[::1', '::1]', '::1:3493', '::ffff:127.0.0.1:3493'] as $host) {
+    check(nut_mc_local_ups("spare@$host") === null && nut_mc_local_ups("spare@$host", $both) === null, "spare@$host is no loopback line");
+}
 $elsewhere = array_merge($multi, ['CUSTOM_UPSMON' => $b("MONITOR spare@127.0.0.1:3494 1 monuser pass master\n")]);
 check(nut_mc_validate($elsewhere) === [], 'a custom MONITOR line on another port is valid: ' . implode(' | ', nut_mc_validate($elsewhere)));
 check(monitors(nut_mc_generate($elsewhere)['upsmon.conf']) === ['ups@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['0', 'slave'], 'third@127.0.0.1' => ['0', 'slave'],
@@ -267,6 +285,29 @@ check(monitors($out['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 's
 [$c] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack', 'MODE' => 'netserver'], $creds);
 check($c['SLAVEUSER'] === 'observer' && nut_mc_decode($c['SLAVEPASS']) === 'obspass' && $c['CUSTOM_USERS'] === '', 'netserver mode takes the account into the slave settings');
 check(nut_mc_validate($c) === [] && strpos(nut_mc_generate($c)['upsd.users'], "[observer]\n\tpassword = \"obspass\"\n\tupsmon slave\n") !== false, 'netserver mode generates the account the MONITOR line logs in with');
+// ... through every loopback spelling of that UPS (mapped, expanded or bracketed IPv4/IPv6, on any port, bare IPv6): the line stays
+// the additional UPS's, so the shutdown UPS keeps its own monitor account and the line keeps its account and power value
+foreach (['[::ffff:127.0.0.1]', '[::FFFF:7F00:1]:3493', '[0:0:0:0:0:ffff:7f00:1]:3494', '[0:0:0:0:0:0:0:1]', '[::1]:3494', '[127.0.0.1]', '::ffff:127.0.0.1'] as $host) {
+    $line = "MONITOR spare@$host 0 observer obspass slave";
+    [$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], array_merge($creds, ['upsmon.conf' => "$line\n"]));
+    check($c['MONUSER'] === 'monuser' && nut_mc_decode($c['MONPASS']) === 'monpass' && $c['IPADDR'] === '127.0.0.1' && has($notes, 'no MONITOR line was found') && !has($notes, 'watched UPS'),
+        "spare@$host does not replace the shutdown UPS's monitor account: " . implode(' | ', $notes));
+    check(nut_mc_decode($c['CUSTOM_UPSMON']) === $line && nut_mc_decode($c['CUSTOM_USERS']) === "[observer]\npassword = obspass\nupsmon slave", "spare@$host keeps its MONITOR line and its account");
+}
+// on the default port the mapped line replaces the generated watcher (standalone upsd listens on 127.0.0.1), on another port it does not
+[$c] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], array_merge($creds, ['upsmon.conf' => "MONITOR spare@[::ffff:127.0.0.1] 0 observer obspass slave\n"]));
+$out = nut_mc_generate($c);
+check(nut_mc_validate($c) === [] && monitors($out['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@[::ffff:127.0.0.1]' => ['0', 'slave']]
+    && strpos($out['upsmon.conf'], "MONITOR spare@[::ffff:127.0.0.1] 0 observer obspass slave\n") !== false && strpos($out['upsd.users'], "[observer]\npassword = obspass\nupsmon slave\n") !== false,
+    'the mapped MONITOR line is generated with its own account instead of a second monitor for the same UPS');
+[$c] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], array_merge($creds, ['upsmon.conf' => "MONITOR spare@[::ffff:127.0.0.1]:3494 0 observer obspass slave\n"]));
+check(nut_mc_validate($c) === [] && monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['0', 'slave'], 'spare@[::ffff:127.0.0.1]:3494' => ['0', 'slave']],
+    'the mapped MONITOR line on another port leaves the UPS watched by the generated monitor');
+// a host that is no loopback line stays the monitor of the shutdown UPS, as before: its account is imported and not kept as a custom line
+foreach (['[::ffff:127.0.0.2]', '[::1::]', '[::2]'] as $host) {
+    [$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], array_merge($creds, ['upsmon.conf' => "MONITOR spare@$host 0 observer obspass slave\n"]));
+    check($c['MONUSER'] === 'observer' && nut_mc_decode($c['MONPASS']) === 'obspass' && $c['CUSTOM_UPSMON'] === '' && !has($notes, 'no MONITOR line was found'), "spare@$host is imported as the monitor line: " . implode(' | ', $notes));
+}
 
 // ---- Auto Config keeps the additional sections ------------------------------------------------------------------
 $scanned = array_merge($defaults, ['CUSTOM_UPS' => $b("# the UPS\nvendorid = 0000\n# more\n$spare")]);
