@@ -86,6 +86,15 @@ function nut_mc_write_cfg($path, array $cfg) {
     return nut_mc_put($path, $text);
 }
 
+function nut_mc_initialize($dir = NUT_MC_DIR) {
+    if (is_file("$dir/nut3.cfg")) return true;
+    $cfg = nut_mc_settings([]);
+    foreach (['MONPASS', 'SLAVEPASS'] as $key) {
+        $cfg[$key] = base64_encode(bin2hex(random_bytes(24)));
+    }
+    return nut_mc_write_cfg("$dir/nut3.cfg", $cfg);
+}
+
 /* Secrets and multi-line fields are stored base64-encoded; legacy values were made with `echo | base64`. */
 function nut_mc_decode($value) {
     $text = base64_decode((string)$value, true);
@@ -389,6 +398,9 @@ function nut_mc_validate(array $c) {
         elseif (isset($names[$c[$user]])) $errors[] = "$label Username: must differ from the other NUT usernames.";
         $names[$c[$user]] = true;
         if ($error = nut_mc_password_error($label, $c[$pass])) $errors[] = $error;
+        if ($netserver && in_array(nut_mc_decode($c[$pass]), ['monpass', 'slavepass', 'adminpass'], true)) {
+            $errors[] = "$label Password: replace the published default password before using Netserver mode.";
+        }
     }
 
     if ($netserver) {
@@ -890,20 +902,29 @@ function nut_mc_apply_scan(array $cfg, $text) {
     return [$c, $msgs];
 }
 
-/* The import report exists from the import until the first generation; "accepted" marks the user's save. */
+/* The import report exists until generation; acceptance is bound to the settings that actually reach disk. */
 function nut_mc_report($dir = NUT_MC_DIR) {
     $report = is_file("$dir/import-report.json") ? json_decode((string)file_get_contents("$dir/import-report.json"), true) : null;
     return is_array($report) ? $report : null;
 }
 
-function nut_mc_pending($dir = NUT_MC_DIR) {
-    $report = nut_mc_report($dir);
-    return $report && empty($report['accepted']) ? $report : null;
+function nut_mc_digest(array $cfg) {
+    $cfg = nut_mc_settings($cfg);
+    ksort($cfg);
+    return hash('sha256', serialize($cfg));
 }
 
-function nut_mc_accept($dir = NUT_MC_DIR) {
-    $report = nut_mc_pending($dir);
-    return !$report || nut_mc_put("$dir/import-report.json", json_encode(['accepted' => true] + $report, JSON_PRETTY_PRINT) . "\n");
+function nut_mc_pending($dir = NUT_MC_DIR) {
+    $report = nut_mc_report($dir);
+    $accepted = $report['accepted'] ?? null;
+    return $report && (!is_string($accepted) || !hash_equals($accepted, nut_mc_digest(nut_mc_read_cfg("$dir/nut3.cfg")))) ? $report : null;
+}
+
+function nut_mc_accept($dir = NUT_MC_DIR, ?array $cfg = null) {
+    $report = nut_mc_report($dir);
+    return !$report || nut_mc_put("$dir/import-report.json", json_encode(
+        ['accepted' => nut_mc_digest($cfg ?? nut_mc_read_cfg("$dir/nut3.cfg"))] + $report, JSON_PRETTY_PRINT
+    ) . "\n");
 }
 
 /* True if the flash drive holds NUT files that this generator did not write. */
@@ -918,12 +939,20 @@ function nut_mc_is_legacy($dir = NUT_MC_DIR) {
 function nut_mc_import_dir($dir = NUT_MC_DIR) {
     $cfgPath = "$dir/nut3.cfg";
     $files = [];
-    @mkdir("$dir/backup/legacy", 0700, true);
-    foreach (NUT_MC_FILES as $name) {
-        $files[$name] = is_file("$dir/ups/$name") ? file_get_contents("$dir/ups/$name") : null;
-        if ($files[$name] !== null && !is_file("$dir/backup/legacy/$name")) copy("$dir/ups/$name", "$dir/backup/legacy/$name");
+    if (!is_dir("$dir/backup/legacy") && !mkdir("$dir/backup/legacy", 0700, true)) return false;
+    foreach (array_merge(NUT_MC_FILES, ['nut3.cfg']) as $name) {
+        $source = $name === 'nut3.cfg' ? $cfgPath : "$dir/ups/$name";
+        $text = is_file($source) ? file_get_contents($source) : null;
+        if ($text === false) return false;
+        if ($name !== 'nut3.cfg') $files[$name] = $text;
+        if ($text === null) continue;
+        $backup = "$dir/backup/legacy/$name";
+        if (is_file($backup)) {
+            if (file_get_contents($backup) !== $text) return false;
+        } elseif (!nut_mc_put($backup, $text)) {
+            return false;
+        }
     }
-    if (is_file($cfgPath) && !is_file("$dir/backup/legacy/nut3.cfg")) copy($cfgPath, "$dir/backup/legacy/nut3.cfg");
     [$cfg, $notes] = nut_mc_import(nut_mc_read_cfg($cfgPath), $files);
     return nut_mc_write_cfg($cfgPath, $cfg)
         && nut_mc_put("$dir/import-report.json", json_encode(['date' => date('Y-m-d H:i'), 'notes' => $notes], JSON_PRETTY_PRINT) . "\n");

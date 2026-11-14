@@ -58,6 +58,7 @@ $modes = [
         'MODE' => 'netserver', 'LISTEN' => '0.0.0.0 192.168.1.2', 'DRIVER' => 'snmp-ups', 'PORT' => '192.168.1.50',
         'SNMPMIB' => 'apcc', 'COMMUNITY' => 'private', 'DEBLEVEL' => '2', 'DEBLEVELMON' => '3', 'UPSKILL' => 'enable',
         'ADMINUSER' => 'upsadmin', 'ADMINPASS' => $b('Adm1n!'),
+        'MONPASS' => $b('MonitorUnique1'), 'SLAVEPASS' => $b('SlaveUnique1'),
         'CUSTOM_NUT' => $b("ALLOW_NO_DEVICE=true\n"),
         'CUSTOM_UPSGLOBAL' => $b("maxretry = 3\r\n"),
         'CUSTOM_UPS' => $b("desc = \"Rack UPS\"\n\n"),

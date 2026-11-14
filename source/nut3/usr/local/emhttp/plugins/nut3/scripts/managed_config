@@ -15,6 +15,12 @@
 require_once __DIR__ . '/../include/nut_managed.php';
 
 switch ($argv[1] ?? '') {
+    case 'init':
+        if (!nut_mc_initialize()) {
+            fwrite(STDERR, "ERROR: initializing NUT settings failed.\n");
+            exit(1);
+        }
+        exit(0);
     case 'write':
         $ok = nut_mc_deploy(NUT_MC_DIR, $messages);
         foreach ($messages as $message) {
@@ -30,6 +36,6 @@ switch ($argv[1] ?? '') {
         echo implode("\n", $messages) . "\n";
         exit(0);
     default:
-        fwrite(STDERR, "usage: managed_config write|scan\n");
+        fwrite(STDERR, "usage: managed_config init|write|scan\n");
         exit(2);
 }

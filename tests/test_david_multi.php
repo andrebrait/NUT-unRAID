@@ -113,7 +113,7 @@ $listening = [
     ':: 192.168.1.2 127.0.0.1' => [1, 2, 2],
 ];
 foreach ($listening as $addresses => $expected) {
-    $net = array_merge($multi, ['MODE' => 'netserver', 'LISTEN' => $addresses]);
+    $net = array_merge($multi, ['MODE' => 'netserver', 'LISTEN' => $addresses, 'MONPASS' => $b('MonitorUnique1'), 'SLAVEPASS' => $b('SlaveUnique1')]);
     check(nut_mc_validate($net) === [], "netserver LISTEN $addresses is valid: " . implode(' | ', nut_mc_validate($net)));
     foreach (['spare@127.0.0.1', 'spare@[::1]', 'spare@localhost'] as $i => $system) {
         check($lines($net, $system) === $expected[$i], "netserver LISTEN $addresses: $system " . ($expected[$i] === 1 ? 'replaces' : 'does not replace') . ' the generated monitor');
@@ -282,7 +282,7 @@ check(strpos($out['upsmon.conf'], "MONITOR spare@127.0.0.1 0 observer obspass sl
 check(strpos($out['upsd.users'], "[observer]\npassword = obspass\nupsmon slave\n") !== false, 'the account exists in the generated upsd.users');
 check(monitors($out['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['0', 'slave']], 'the shutdown UPS keeps power value 1, the other stays a watch-only slave');
 // netserver mode generates the slave account, so the same account moves into the settings
-[$c] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack', 'MODE' => 'netserver'], $creds);
+[$c] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack', 'MODE' => 'netserver', 'MONPASS' => $b('MonitorUnique1')], $creds);
 check($c['SLAVEUSER'] === 'observer' && nut_mc_decode($c['SLAVEPASS']) === 'obspass' && $c['CUSTOM_USERS'] === '', 'netserver mode takes the account into the slave settings');
 check(nut_mc_validate($c) === [] && strpos(nut_mc_generate($c)['upsd.users'], "[observer]\n\tpassword = \"obspass\"\n\tupsmon slave\n") !== false, 'netserver mode generates the account the MONITOR line logs in with');
 // ... through every loopback spelling of that UPS (mapped, expanded or bracketed IPv4/IPv6, on any port, bare IPv6): the line stays
