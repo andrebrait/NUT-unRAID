@@ -3,14 +3,14 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "nut3">
 <!ENTITY author    "andrebrait">
-<!ENTITY version   "2026.11.14">
+<!ENTITY version   "2026.11.14.1">
 <!ENTITY launch    "Settings/NUTsettings">
 <!ENTITY gitURL    "https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master">
 <!ENTITY pluginURL "&gitURL;/plugin/&name;.plg">
 <!ENTITY pkgURL    "&gitURL;/packages">
 <!ENTITY plgPATH   "/boot/config/plugins/&name;">
-<!ENTITY plgNAME   "nut-plugin-2026.11.14-x86_64-1">
-<!ENTITY plgMD5    "3b66c9fcb0547d09ac293c9d09170af6">
+<!ENTITY plgNAME   "nut-plugin-2026.11.14.1-x86_64-1">
+<!ENTITY plgMD5    "0e15f01282489e8c1c776d3fa15dcd40">
 <!ENTITY nutNAME   "nut-2.8.5.1711_g1c4ab78c6-x86_64-2_andrebrait">
 <!ENTITY nutMD5    "c9109f45b7240ed720aa22143cd1e3f9">
 <!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
@@ -20,6 +20,14 @@
 
 <CHANGES>
 ## NUT v3 (Network UPS Tools)
+###2026.11.14.1
+- Security: Generate unique monitor and slave passwords on installation and reset. Netserver mode rejects the published legacy passwords; replace them in NUT Settings before applying or starting.
+- Security: Prevent credentials from leaking through NUT debug archives.
+- Preserve nut-dw settings when an existing nut3 configuration prevents automatic migration.
+- Keep configuration imports pending until the reviewed settings are persisted, and abort imports when recovery backups cannot be saved.
+- Prevent stale on-battery timers from triggering an early shutdown during a later outage.
+- Report backend installation failures instead of continuing as if the package installed successfully.
+- Important: Imported legacy configurations remain active until reviewed. Rotate published default network credentials promptly; upgrades do not silently change credentials used by other systems.
 ###2026.11.14
 - Integrates improvements from David Coulson's NUT-unRAID fork, preserving the original commit history.
 - Add monitoring for additional UPSes, writable UPS settings, outlet controls, scheduled battery self-tests and delayed alerts.
@@ -569,7 +577,13 @@ replace the nut-dw plugin (this plugin's previous name), keeping its settings
 <INLINE>
 # Migrate from nut-dw (tests/e2e/harness.py runs this block)
 OLD=/boot/config/plugins/nut-dw
-if [ -d "$OLD" ] &amp;&amp; [ ! -f &plgPATH;/&name;.cfg ]; then
+KEEPOLD="NO"
+if [ -d "$OLD" ] &amp;&amp; [ -f &plgPATH;/&name;.cfg ]; then
+    # both exist: neither is overwritten, the nut-dw settings stay in place for reference
+    KEEPOLD="YES"
+    echo "WARNING: The settings of the nut-dw plugin in $OLD were not moved, because &plgPATH;/&name;.cfg already exists."
+    echo "WARNING: &name; keeps its current settings. To use the nut-dw settings instead, copy $OLD/nut-dw.cfg over &plgPATH;/&name;.cfg."
+elif [ -d "$OLD" ]; then
     echo "Moving the settings of the nut-dw plugin to &name;..."
     mkdir -p &plgPATH; || exit 1
     for f in "$OLD"/*; do
@@ -585,7 +599,10 @@ if [ -e "$OLD" ] || [ -e /boot/config/plugins/nut-dw.plg ] || [ -e /usr/local/em
     echo "Removing the nut-dw plugin, which &name; replaces..."
 fi
 rm -f /boot/config/plugins/nut-dw.plg /var/log/plugins/nut-dw.plg
-rm -rf /usr/local/emhttp/plugins/nut-dw "$OLD"
+rm -rf /usr/local/emhttp/plugins/nut-dw
+if [ "$KEEPOLD" == "NO" ]; then
+    rm -rf "$OLD"
+fi
 echo ""
 </INLINE>
 </FILE>
@@ -688,26 +705,26 @@ if [ -e "$CONFIG" ]; then
     source "$CONFIG"
     if [ "$BACKEND" == "preview" ]; then
         echo "Installing user-configured PREVIEW backend for NUT..."
-        upgradepkg --install-new "$PREVIEWPKG"
+        upgradepkg --install-new "$PREVIEWPKG" || exit 1
     elif [ "$BACKEND" == "default" ]; then
         echo "Installing DEFAULT backend for NUT..."
-        upgradepkg --install-new "$DEFAULTPKG"
+        upgradepkg --install-new "$DEFAULTPKG" || exit 1
     elif [ "$BACKEND" == "previous" ]; then
         echo "Installing user-configured PREVIOUS backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.8.4-x86_64-1stable.ssl31.txz
+        upgradepkg --install-new &plgPATH;/nut-2.8.4-x86_64-1stable.ssl31.txz || exit 1
     elif [ "$BACKEND" == "stable" ]; then
         echo "Installing user-configured STABLE backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.8.3-x86_64-2stable.ssl31.txz
+        upgradepkg --install-new &plgPATH;/nut-2.8.3-x86_64-2stable.ssl31.txz || exit 1
     elif [ "$BACKEND" == "legacy" ]; then
         echo "Installing user-configured LEGACY backend for NUT..."
-        upgradepkg --install-new &plgPATH;/nut-2.7.4.20200318-x86_64-1.txz
+        upgradepkg --install-new &plgPATH;/nut-2.7.4.20200318-x86_64-1.txz || exit 1
     else
         echo "Installing DEFAULT backend for NUT..."
-        upgradepkg --install-new "$DEFAULTPKG"
+        upgradepkg --install-new "$DEFAULTPKG" || exit 1
     fi
 else
     echo "Installing DEFAULT backend for NUT..."
-    upgradepkg --install-new "$DEFAULTPKG"
+    upgradepkg --install-new "$DEFAULTPKG" || exit 1
 fi
 echo ""
 </INLINE>

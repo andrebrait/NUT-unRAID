@@ -35,6 +35,17 @@ There is no default admin user. `admin/adminpass` is gone. The admin user appear
 the user enters both a username and a password. The NUT Commands page sends commands with these stored
 credentials, which never reach the browser. Without credentials, the page is disabled with an explanation.
 
+Fresh installations and configuration resets generate separate random monitor and slave passwords.
+Upgrades preserve existing credentials. Netserver validation rejects the published legacy passwords
+`monpass`, `slavepass` and `adminpass`; replace them before applying or starting managed Netserver mode.
+Imported legacy files remain active until reviewed, including their existing network credentials.
+Rotate those credentials promptly when reviewing a Netserver import.
+
+On-battery workers retire their shutdown countdown after two online readings a second apart, even when
+delayed alerts are disabled. A single online reading followed by on-battery status does not cancel shutdown.
+If the entire recovery window is missed, NUT's notification data cannot identify which outage a late worker
+belongs to; the plugin retains shutdown protection rather than discarding an ambiguous on-battery event.
+
 upsmon roles stay `master`/`slave`. NUT 2.8.x also accepts `primary`/`secondary`, but the still-offered
 legacy 2.7.4 backend accepts only the old words, and 2.8.x prints no deprecation warning for them.
 
@@ -132,12 +143,21 @@ rename writes. A file whose content changed is first copied to `/boot/config/plu
 (the directory `0750`), as before. User files such as `xnut-notify-hooks.sh` and `xnut-nospam.conf` also
 live in that flash directory. With the editor gone, users edit them there.
 
+NUT debug archives redact passwords in every copied monitor and user configuration, custom driver
+credentials and known credentials in logs. Redaction failure prevents archive creation. The plugin no
+longer embeds the separate full-system Unraid diagnostics ZIP, which would bypass this redaction.
+
 ## Migration and import
+
+When `nut3.cfg` already exists during replacement of `nut-dw`, the installer keeps both configurations
+and warns instead of deleting the old `/boot/config/plugins/nut-dw` directory. The old plugin manifest is
+removed to prevent its automatic reinstallation. Review both configurations before choosing which to use.
 
 On the first `managed_config write` after an upgrade, the import runs when the flash directory holds NUT
 files without the generated header and no import report exists:
 
-1. The old files and `nut3.cfg` are copied once to `backup/legacy/`.
+1. The old files and `nut3.cfg` are backed up atomically to `backup/legacy/`. A failed backup or an
+   existing backup with different contents aborts the import before settings are changed.
 2. Each file is tokenised. Recognised directives become settings. Everything else, comments excepted, goes
    verbatim into the custom field of that file. A recognised directive that repeats, or whose value the
    settings cannot express (an unknown MIB, `SHUTDOWNCMD` other than poweroff, `NOTIFYFLAG ONBATT` with other
@@ -159,7 +179,7 @@ loses nothing, and the user resolves every conflict by editing a field.
 
 ## Conflict reporting and activation blocking
 
-While `import-report.json` exists without `accepted`, the import is pending. `managed_config write` then
+While `import-report.json` exists without acceptance matching the persisted settings, the import is pending. `managed_config write` then
 leaves the old files alone and returns success, so NUT keeps running, and keeps starting after reboots, with
 the configuration it had before the upgrade. The settings page shows a red banner with the import notes, and
 lists every current validation error on the page.
@@ -167,7 +187,9 @@ lists every current validation error on the page.
 Applying the settings form with NUT stopped (the fields are disabled while NUT runs, as before) sends them
 through validation. On errors, `nut_validate.php` sets `$save = false` and removes `#command`, so
 `/update.php` neither writes the settings nor runs the start or stop script, and the page shows the errors in
-a dialog. A successful save marks the report `accepted`. The following `write_config` generates the files,
+a dialog. Before saving, the hook records a digest of the reviewed settings, checking that the report write
+succeeded. Acceptance takes effect only when `nut3.cfg` contains those exact settings, so a failed or
+interrupted settings write leaves the import pending. The following `write_config` generates the files,
 which pushes the old ones into `backup/*.bak`, and deletes the report.
 
 Outside an import, invalid settings, for example after a manual edit of `nut3.cfg`, make
