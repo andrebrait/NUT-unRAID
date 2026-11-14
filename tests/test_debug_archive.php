@@ -22,10 +22,18 @@ try {
     }
     $secret = 'custom/archive^hidden';
     $monitor = "MONITOR other@10.0.0.2 0 observer \"$secret\" slave\n";
+    $continued = 'r8V3n6J2';
+    $certificate = 'v7Q9k2mL';
+    $quoted = 's4C8d2G9';
+    $splitDirective = 'x7B5k2H8';
+    $monitor .= "MONITOR continued@10.0.0.3 0 observer \\\n$continued slave\n";
+    $monitor .= "MONITOR quoted@10.0.0.4 0 observer \"s4C8\nd2G9\" slave\n";
+    $monitor .= "MON\\\nITOR split@10.0.0.5 0 observer $splitDirective slave\n";
+    put("$root/etc/nut/upsd.conf", "CERTIDENT tower $certificate\n");
     put("$root/etc/nut/upsmon.conf", $monitor);
     put("$root/boot/config/plugins/nut3/ups/upsmon.conf", $monitor);
     put("$root/boot/config/plugins/nut3/nut3.cfg", 'MONUSER="monuser"' . "\nMONPASS=\"" . base64_encode('sample/pass') . "\"\nSLAVEUSER=\"slaveuser\"\nSLAVEPASS=\"" . base64_encode('slave-secret') . "\"\nCUSTOM_UPSMON=\"" . base64_encode($monitor) . "\"\n");
-    put("$root/var/log/nut.log", "A log entry containing $secret\nUPS is online\n");
+    put("$root/var/log/nut.log", "A log entry containing $secret\nContinuation rejected: $continued\nTLS identity rejected: $certificate\nQuoted identity rejected: $quoted\nSplit identity rejected: $splitDirective\nUPS is online\n");
     put("$root/boot/config/go", "#!/bin/bash\n");
     put("$root/etc/unraid-version", "version=7.3.4\n");
     put("$root/boot/config/plugins/nut3.plg", '<PLUGIN/>');
@@ -33,6 +41,9 @@ try {
     put("$root/bin/lsusb", "#!/bin/bash\necho 'USB diagnostic fixture'\n");
     chmod("$root/bin/pgrep", 0700);
     chmod("$root/bin/lsusb", 0700);
+    // A failing caller-side text tool must not bypass the helper's checked settings scrub.
+    put("$root/bin/sed", "#!/bin/bash\nexit 1\n");
+    chmod("$root/bin/sed", 0700);
     $script = file_get_contents("$plugin/scripts/debug");
     $script = str_replace(['/tmp/nut-debug', '/usr/local/', '/boot/', '/etc/', '/var/log/', '/sys/', '/usr/bin/upsc', '/usr/bin/nut-scanner'],
         ["$root/staging", "$root/usr/local/", "$root/boot/", "$root/etc/", "$root/var/log/", "$root/sys/", "$root/usr/bin/upsc", "$root/usr/bin/nut-scanner"], $script);
@@ -44,8 +55,19 @@ try {
         exec('unzip -p ' . escapeshellarg($archives[0]) . ' 2>/dev/null', $contents, $readCode);
         $contents = implode("\n", $contents);
         check($readCode === 0 && strpos($contents, $secret) === false && strpos($contents, 'sample/pass') === false, 'the finished archive contains no custom or regex-sensitive password');
+        foreach ([$continued, $certificate, $quoted, $splitDirective] as $privateValue) {
+            check(strpos($contents, $privateValue) === false, 'complete logical directives and CERTIDENT cannot leak a credential into configuration or logs');
+        }
+        check(strpos($contents, base64_encode('sample/pass')) === false && strpos($contents, base64_encode($monitor)) === false,
+            'the settings copy cannot leak encoded credentials when a caller-side scrub fails');
         check(strpos($contents, 'UPS is online') !== false && strpos($contents, 'USB diagnostic fixture') !== false, 'the archive retains useful log and USB diagnostics');
     }
+    $settingsPath = "$root/boot/config/plugins/nut3/nut3.cfg";
+    $savedSettings = file_get_contents($settingsPath);
+    put($settingsPath, '[unterminated');
+    exec('PATH=' . escapeshellarg("$root/bin:" . getenv('PATH')) . ' bash ' . escapeshellarg("$root/debug.sh") . ' 2>&1', $invalidOutput, $invalidCode);
+    check($invalidCode !== 0 && glob("$dest/debug/*.zip") === [], 'unparseable settings prevent archive creation');
+    put($settingsPath, $savedSettings);
     // A failed scrub must not leave a downloadable archive.
     put("$dest/scripts/debug_redact", "<?php exit(1);\n");
     exec('PATH=' . escapeshellarg("$root/bin:" . getenv('PATH')) . ' bash ' . escapeshellarg("$root/debug.sh") . ' 2>&1', $failedOutput, $failedCode);

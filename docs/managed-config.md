@@ -146,7 +146,9 @@ rename writes. A file whose content changed is first copied to `/boot/config/plu
 live in that flash directory. With the editor gone, users edit them there.
 
 NUT debug archives redact passwords in every copied monitor and user configuration, custom driver
-credentials and known credentials in logs. Redaction failure prevents archive creation. The plugin no
+credentials, `CERTIDENT` private-key passwords and known credentials in logs. Redaction handles complete
+logical directives, including continued and quoted multiline values. The settings copy is parsed and
+redacted inside the checked helper; read, parse or write failure prevents archive creation. The plugin no
 longer embeds the separate full-system Unraid diagnostics ZIP, which would bypass this redaction.
 
 ## Migration and import
