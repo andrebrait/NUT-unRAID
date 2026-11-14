@@ -172,10 +172,23 @@ check(file_get_contents("$guard/notes.txt") === "[file removed: a credential cou
 // Values quoted for parseconf can appear decoded in logs.
 $escaped = "$guard/escaped";
 mkdir($escaped, 0700);
-file_put_contents("$escaped/ups.conf", 'authPassword = "back\\\\slash"' . "\n");
+file_put_contents("$escaped/ups.conf", 'authPasswo\\rd = "back\\\\slash"' . "\n");
 file_put_contents("$escaped/log.txt", "authentication failed for back\\slash\n");
 check(nut_redact_dir($escaped, nut_mc_settings([])), 'escaped credential redaction succeeds');
 check(strpos(file_get_contents("$escaped/log.txt"), 'back\\slash') === false, 'decoded custom credentials are also removed from logs');
+
+// A malformed tail must not hide a decoded directive name or weaken conservative removal.
+foreach (['"MONITOR"', 'MONI\\TOR'] as $index => $directive) {
+    $malformed = "$guard/malformed-$index";
+    mkdir($malformed, 0700);
+    file_put_contents("$malformed/upsmon.conf", "$directive other@host 0 observer m8G2q4L6 \"\n");
+    file_put_contents("$malformed/log.txt", "Peer rejected: m8G2q4L6\n");
+    check(nut_redact_dir($malformed, nut_mc_settings([])), 'malformed decoded MONITOR redaction succeeds');
+    check(strpos(file_get_contents("$malformed/upsmon.conf"), '[MONITOR line removed: unrecognised format]') !== false,
+        'a malformed quoted or escaped MONITOR is removed conservatively');
+    check(strpos(file_get_contents("$malformed/log.txt"), 'm8G2q4L6') === false,
+        'the malformed MONITOR fallback still collects the visible credential');
+}
 
 remove_tree($tmp);
 remove_tree($guard);

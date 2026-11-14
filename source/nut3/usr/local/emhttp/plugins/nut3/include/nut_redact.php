@@ -19,7 +19,6 @@ require_once __DIR__ . '/nut_managed.php';
 
 const NUT_REDACT_KEYWORD = '/pass(?:word|wd)?\b|secret|community|token/i';
 const NUT_REDACT_VALUE = '/(?:pass(?:word|wd)?\b|secret|community|token)\S*?\s*[=:]?\s*(.*)$/i';
-const NUT_REDACT_MONITOR = '/^\s*MONITOR\b/i';
 
 /* Redacts every file below $dir in place, including the settings copy. Returns false on read, parse or write failure. */
 function nut_redact_dir($dir, array $cfg) {
@@ -120,16 +119,16 @@ function nut_redact_lines($text) {
 function nut_redact_found($text) {
     $found = [];
     foreach (nut_redact_lines($text) as $line) {
-        if (preg_match(NUT_REDACT_MONITOR, $line)) {
-            $words = nut_mc_words($line);
+        $words = nut_mc_words($line);
+        // A malformed tail must not hide an otherwise valid directive name.
+        $directive = strtoupper(($words ?? nut_mc_words(preg_split('/\s+/', trim($line))[0]))[0] ?? '');
+        if ($directive === 'MONITOR') {
             $found[] = $words !== null && count($words) === 6 ? $words[4] : (preg_split('/\s+/', trim($line))[4] ?? '');
-        } elseif (preg_match('/^\s*CERTIDENT\b/i', $line)) {
-            $words = nut_mc_words($line);
-            $found[] = $words !== null && count($words) >= 3 ? end($words) : '';
-        } elseif (preg_match(NUT_REDACT_VALUE, $line, $m)) {
-            $found[] = $m[1];
-            $words = nut_mc_words($line);
-            if ($words && preg_match(NUT_REDACT_KEYWORD, $words[0])) {
+        } elseif ($directive === 'CERTIDENT') {
+            $found[] = $words[2] ?? '';
+        } else {
+            if (preg_match(NUT_REDACT_VALUE, $line, $m)) $found[] = $m[1];
+            if ($words && preg_match(NUT_REDACT_KEYWORD, $directive)) {
                 $found[] = ($words[1] ?? '') === '=' ? ($words[2] ?? '') : ($words[1] ?? '');
             }
         }
@@ -141,12 +140,13 @@ function nut_redact_found($text) {
 function nut_redact_text($text, array $secrets, array $names) {
     $lines = [];
     foreach (nut_redact_lines($text) as $line) {
-        if (preg_match(NUT_REDACT_MONITOR, $line)) {
-            $words = nut_mc_words($line);
+        $words = nut_mc_words($line);
+        $directive = strtoupper(($words ?? nut_mc_words(preg_split('/\s+/', trim($line))[0]))[0] ?? '');
+        if ($directive === 'MONITOR') {
             $lines[] = $words !== null && count($words) === 6
                 ? "MONITOR {$words[1]} {$words[2]} {$words[3]} PASS-REMOVED {$words[5]}"
                 : '[MONITOR line removed: unrecognised format]';
-        } elseif (preg_match('/^\s*CERTIDENT\b/i', $line) || preg_match(NUT_REDACT_KEYWORD, $line)) {
+        } elseif ($directive === 'CERTIDENT' || preg_match(NUT_REDACT_KEYWORD, $directive) || preg_match(NUT_REDACT_KEYWORD, $line)) {
             $lines[] = '[credential line removed]';
         } else {
             $lines[] = $line;

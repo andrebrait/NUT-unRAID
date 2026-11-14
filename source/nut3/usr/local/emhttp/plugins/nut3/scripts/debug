@@ -20,6 +20,14 @@
 DEBUGROOT="/tmp/nut-debug"
 PKGROOT="/usr/local/emhttp/plugins/nut3/debug"
 CONFIG="/boot/config/plugins/nut3/nut3.cfg"
+
+# Both staging and published archives are shared; retain this lock through final cleanup.
+exec 9>/var/run/nut-debug.lock || exit 1
+if ! flock -n 9; then
+    echo "ERROR: another debug export is already running."
+    exit 1
+fi
+
 DEBUGTIME="$(date '+%Y%m%d%H%M%S' 2>/dev/null)"
 DEBUGNAME="nut-debug-${DEBUGTIME}.zip"
 
@@ -30,7 +38,7 @@ mkdir -p $PKGROOT 2>&1
 # prepare packaging location
 rm -rf $DEBUGROOT 2>&1
 
-mkdir -p $DEBUGROOT 2>&1
+mkdir -m 700 "$DEBUGROOT" || exit 1
 mkdir -p $DEBUGROOT/RAM 2>&1
 mkdir -p $DEBUGROOT/USB 2>&1
 mkdir -p $DEBUGROOT/PLUGIN 2>&1
