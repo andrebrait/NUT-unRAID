@@ -150,12 +150,19 @@ credentials, `CERTIDENT` private-key passwords and known credentials in logs. Re
 logical directives, including continued and quoted multiline values. The settings copy is parsed and
 redacted inside the checked helper; read, parse or write failure prevents archive creation. The plugin no
 longer embeds the separate full-system Unraid diagnostics ZIP, which would bypass this redaction.
+Only one debug export can run at a time. A whole-run lock under `/var/run` prevents another request from
+replacing redacted staging files with raw files; overlapping requests fail before touching either directory.
 
 ## Migration and import
 
 When `nut3.cfg` already exists during replacement of `nut-dw`, the installer keeps both configurations
 and warns instead of deleting the old `/boot/config/plugins/nut-dw` directory. The old plugin manifest is
 removed to prevent its automatic reinstallation. Review both configurations before choosing which to use.
+
+To use the retained `nut-dw` configuration, stop NUT and move the entire current `nut3` settings directory
+aside as a backup. Recreate an empty `nut3` directory, restore `nut-dw/nut-dw.cfg` as `nut3/nut3.cfg` and
+copy `nut-dw/ups/` to `nut3/ups/`. Start NUT to import those files, then review the imported settings before
+applying. Starting from a clean directory avoids reusing an unrelated import report or recovery backup.
 
 On the first `managed_config write` after an upgrade, the import runs when the flash directory holds NUT
 files without the generated header and no import report exists:
