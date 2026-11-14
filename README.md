@@ -19,6 +19,8 @@
 
 This is a maintained fork of [desertwitch/NUT-unRAID](https://github.com/desertwitch/NUT-unRAID) by desertwitch. Upstream has announced its end of support, so this fork carries on maintaining the plugin and publishes its own releases as **NUT v3 (Network UPS Tools)**, plugin `nut3`, based on desertwitch's NUT plugin.
 
+This fork also incorporates work from [David Coulson's NUT-unRAID fork](https://github.com/davidcoulson/NUT-unRAID), with original authorship preserved in the Git history.
+
 ### Installation
 
 In the Unraid web UI, go to **Plugins → Install Plugin** and enter:

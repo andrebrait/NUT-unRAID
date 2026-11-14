@@ -22,11 +22,11 @@ and sourced by the bash scripts. Values that `default.cfg` lacks fall back to it
 | File | Generated from | Custom field |
 | --- | --- | --- |
 | nut.conf | `MODE` (`slave` is written as `netclient`) | `CUSTOM_NUT` |
-| ups.conf | `NAME`, `DRIVER`/`SERIAL`, `PORT`, `DEBLEVEL`, and for snmp-ups also `POLL`, `COMMUNITY`, `SNMPVER`, `SNMPMIB` | `CUSTOM_UPSGLOBAL` (before the section), `CUSTOM_UPS` (inside it) |
+| ups.conf | `NAME`, `DRIVER`/`SERIAL`, `PORT`, `DEBLEVEL`, and for snmp-ups also `POLL`, `COMMUNITY`, `SNMPVER`, `SNMPMIB` | `CUSTOM_UPSGLOBAL` (before the section), `CUSTOM_UPS` (inside it; may add further UPS sections) |
 | upsd.conf | `LISTEN` in netserver mode, otherwise `127.0.0.1` | `CUSTOM_UPSD` |
 | upsd.users | `MONUSER`/`MONPASS` (upsmon master); `SLAVEUSER`/`SLAVEPASS` (upsmon slave, netserver only); `ADMINUSER`/`ADMINPASS` (SET, FSD, all instant commands, only if configured) | `CUSTOM_USERS` |
-| upsmon.conf | `NAME@IPADDR`, `MONUSER`/`MONPASS`, `UPSKILL` (power-down flag), `DEBLEVELMON`, plus the fixed shutdown command, notify command and notify flags | `CUSTOM_UPSMON` |
-| upssched.conf | nothing | `CUSTOM_UPSSCHED` |
+| upsmon.conf | `NAME@IPADDR`, `MONUSER`/`MONPASS`, `UPSKILL` (power-down flag), configured timers and notify flags; additional local UPSes are monitored with power value 0 and the `slave` role | `CUSTOM_UPSMON` |
+| upssched.conf | `ONBATTDELAY` and `EARLYSTAGE`: timers for every monitored UPS (`CMDSCRIPT`, `PIPEFN`, `LOCKFN` and `AT` lines), nothing while both are 0 | `CUSTOM_UPSSCHED` |
 
 Slave mode runs neither a driver nor upsd. In that mode `ups.conf`, `upsd.conf` and `upsd.users` contain
 only the header, and their custom fields are hidden and ignored.
@@ -52,11 +52,61 @@ is checked against those keys. Keys compare case-insensitively. The upsmon direc
 `NOTIFYFLAG ONBATT` is a conflict. A directive the settings do not currently emit, for example
 `debug_min` while the driver debug level is "Default", may go in the custom field. Further rules:
 
-- The `ups.conf` fields may not open another section, because only one UPS is supported.
+- `CUSTOM_UPSGLOBAL` may not open a section. `CUSTOM_UPS` may add UPS sections after the configured UPS's directives; each additional UPS needs a unique name, `driver` and `port`. Generated monitors use power value 0 and the `slave` role. A custom `MONITOR` line replaces the generated one only if it certainly reaches the generated upsd, and may then change shutdown behavior (see "Additional local UPSes").
 - The `upsd.users` field must start with a `[user]` header. Otherwise its directives would join the last
   generated user. It may not redefine a generated user.
 - Custom text must be printable ASCII and must tokenise cleanly. NUT drops other bytes and rejects
   unterminated quotes and `#` inside quotes.
+
+The upsmon timers and the six default notify flags are the exception to the override rule: a custom directive
+with the same key (`FINALDELAY 10`, `NOTIFYFLAG LOWBATT SYSLOG+WALL`) replaces the setting instead of
+conflicting, so files that set them by hand stay valid. On import, a timer line becomes a setting only if the
+old `nut3.cfg` already held that setting (the old backend rewrote the line from it); otherwise it stays a
+custom directive. The upssched directives are managed only while `ONBATTDELAY` or `EARLYSTAGE` is above 0, so
+an existing custom `upssched.conf` stays valid until one of them is turned on.
+
+In legacy full manual mode, custom scheduling directives are retained even when the old generated-file header is present. Directives that conflict with newly enabled managed timers must be resolved before applying.
+
+## Additional local UPSes: monitoring and power-off
+
+An additional UPS is monitored by a generated `MONITOR name@127.0.0.1 0 ... slave` line, which only watches it. A
+custom `MONITOR` line for it replaces the generated one only if it certainly reaches the generated upsd: port 3493
+(the generated `LISTEN` lines carry no port) and every address family its host can resolve to is one upsd listens on.
+Standalone mode generates `LISTEN 127.0.0.1`, netserver mode the `LISTEN` setting, in that order.
+
+| Custom system | Needs |
+| --- | --- |
+| `127.0.0.1`, `[::ffff:127.0.0.1]` | IPv4: a `LISTEN` of `127.0.0.1` or `0.0.0.0` (always there) |
+| `[::1]` | IPv6: a `LISTEN` of `::1`, or of `::` with no address after it |
+| `localhost` | both, it may resolve to `::1` first, where another daemon could answer |
+
+Any other line (another port or host, a bare `::1`, which upsmon rejects, an address without its listener) is kept as
+written and the generated watch-only monitor stays next to it. Two monitors may report the same UPS twice. A retained
+custom monitor with a nonzero power value can still affect shutdown; malformed custom directives may prevent NUT from starting.
+
+After a shutdown with the power-down flag (`killpower`), `rc.nut` applies the same rules to the `upsd.conf` in use: it
+powers off the configured UPS and every monitored UPS with a power value above 0 whose system certainly reaches this
+system's upsd. Watch-only monitors and remote systems are never powered off. Where the identity cannot be established
+the monitor is skipped, which is the safe side: another daemon on the same port could own a UPS of the same name.
+An additional UPS skipped for an ambiguous `localhost` monitor can remain powered after shutdown, preventing automatic
+restart when utility power returns. Review legacy multi-UPS settings before relying on UPS power-off.
+Exclusions, because current NUT and the legacy 2.7.4 backend differ:
+
+- `::` is never credited with IPv4. Current NUT opens IPv6-only sockets, 2.7.4 on Linux also accepts IPv4 through it.
+  A `127.0.0.1` monitor needs its own `LISTEN 127.0.0.1` or `0.0.0.0`.
+- `::` counts for IPv6 only if no other `LISTEN` of its port follows it: 2.7.4 binds the lines last to first, and the
+  bind of `::` fails after another socket of that port. List `::` last, as in `LISTEN 0.0.0.0` then `LISTEN ::`.
+- `LISTEN *` (fatal on 2.7.4), `LISTEN localhost` (binds one address of an unknown family), other host names, an
+  IPv4-mapped `LISTEN ::ffff:127.0.0.1` (not bindable on current NUT) and the inline `LISTEN address:port` form cover
+  nothing.
+- An `upsd.conf` that cannot be read, or a `LISTEN` line that is not understood, adds no listener. Without any
+  `LISTEN` line upsd listens on `127.0.0.1` and `::1`, port 3493. `LISTEN` and `MONITOR` count in upper case only,
+  as for upsd and upsmon.
+- The configuration decides, no socket is probed: another daemon that holds a port upsd failed to bind is not detected.
+
+A skipped monitor of a loopback address with a power value above 0 is logged to syslog by `rc.nut` (`Not powering off
+UPS [name]`), except for the configured UPS, which is powered off anyway. To fix it, write `127.0.0.1` or `[::1]`
+together with a matching `LISTEN` line, or listen on both families when using `localhost`.
 
 ## Escaping
 

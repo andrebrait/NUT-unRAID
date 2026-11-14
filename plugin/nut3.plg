@@ -3,14 +3,14 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "nut3">
 <!ENTITY author    "andrebrait">
-<!ENTITY version   "2026.11.11">
+<!ENTITY version   "2026.11.14">
 <!ENTITY launch    "Settings/NUTsettings">
 <!ENTITY gitURL    "https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master">
 <!ENTITY pluginURL "&gitURL;/plugin/&name;.plg">
 <!ENTITY pkgURL    "&gitURL;/packages">
 <!ENTITY plgPATH   "/boot/config/plugins/&name;">
-<!ENTITY plgNAME   "nut-plugin-2026.11.11-x86_64-1">
-<!ENTITY plgMD5    "5964b75b11cf4b22185eb4976bed2d0d">
+<!ENTITY plgNAME   "nut-plugin-2026.11.14-x86_64-1">
+<!ENTITY plgMD5    "f026b95a376201081dad719ecd2b08b2">
 <!ENTITY nutNAME   "nut-2.8.5.1711_g1c4ab78c6-x86_64-2_andrebrait">
 <!ENTITY nutMD5    "c9109f45b7240ed720aa22143cd1e3f9">
 <!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
@@ -20,6 +20,13 @@
 
 <CHANGES>
 ## NUT v3 (Network UPS Tools)
+###2026.11.14
+- Integrates improvements from David Coulson's NUT-unRAID fork, preserving the original commit history.
+- Add monitoring for additional UPSes, writable UPS settings, outlet controls, scheduled battery self-tests and delayed alerts.
+- Improve shutdown handling, service restart safety, driver retry, UPS notifications and statistics permissions.
+- Add a remote connection test and improve settings layout and accessibility.
+- Preserve custom schedules during migration, keep shutdown monitoring responsive, and report unverified self-test results accurately.
+- Important: Review legacy multi-UPS settings before relying on power-off. Ambiguous localhost monitors may be skipped to avoid turning off an unrelated UPS; a skipped UPS may stay on and prevent automatic restart.
 ###2026.11.11
 - NUT v3 (Network UPS Tools) installs NUT built in GitHub Actions from upstream master (commit 1c4ab78c6, with OpenSSL) as its default and preview backend
 - important: the plugin is renamed from nut-dw to nut3 and is listed as NUT v3 (Network UPS Tools), so it can be told apart from desertwitch's NUT plugin (NUT v2), on which it is based. Installing it replaces the nut-dw plugin and keeps your settings: they move from /boot/config/plugins/nut-dw to /boot/config/plugins/nut3 and nut-dw.cfg becomes nut3.cfg
@@ -512,6 +519,7 @@ if [ -f /boot/config/plugins/nut.plg ] || [ -f /boot/config/plugins/nut-2.8.0.pl
     exit 1
 fi
 
+pgrep -x upsmon >/dev/null 2>&amp;1 &amp;&amp; UPSMON_WAS_RUNNING="YES"
 echo "Making sure all existing NUT services are stopped (before install/upgrade)..."
 if [ -x /etc/rc.d/rc.nut ]; then
     if ! /etc/rc.d/rc.nut stop >/dev/null 2>&amp;1; then
@@ -521,6 +529,22 @@ if [ -x /etc/rc.d/rc.nut ]; then
         echo "WARNING:"
     fi
     killall nut-poller >/dev/null 2>&amp;1
+fi
+
+# If the upgrade fails after this point (e.g. a download error), nothing else restarts NUT. The marker keeps this
+# safety check armed: the installation step removes it only once NUT monitors again (not before a failed or deferred
+# start has succeeded), so it can neither be dropped while the UPS is unmonitored nor restart a NUT the user stopped
+# after a completed upgrade. Without a marker the check does nothing, so an unschedulable check leaves none behind.
+if [ "$UPSMON_WAS_RUNNING" == "YES" ]; then
+    echo "Scheduling a safety check to restart NUT in 10 minutes if the upgrade does not complete..."
+    SAFETYNET="/var/run/nut3-upgrade-restart.$$"
+    if ! touch "$SAFETYNET" || ! at -M now + 10 minutes &lt;&lt;&lt; "[ -e $SAFETYNET ] &amp;&amp; rm -f $SAFETYNET &amp;&amp; { [ ! -f &plgPATH;/&name;.cfg ] || ( . &plgPATH;/&name;.cfg; [ \"\${SERVICE:-}\" != disable ] ); } &amp;&amp; { pgrep -x upsmon >/dev/null 2>&amp;1 || /etc/rc.d/rc.nut start 2>&amp;1 | logger -t \"rc.nut\"; }" >/dev/null 2>&amp;1; then
+        rm -f "$SAFETYNET"
+        echo "WARNING:"
+        echo "WARNING: The safety check could not be scheduled. IF THE UPGRADE FAILS, NUT will stay stopped and your UPS"
+        echo "WARNING: unmonitored until you start it again (Settings > NUT Settings) or reboot."
+        echo "WARNING:"
+    fi
 fi
 
 if [ -x /etc/rc.d/rc.nutstats ]; then
@@ -609,8 +633,8 @@ if [ -d /boot/config/plugins/nut ] &amp;&amp; [ ! -d &plgPATH; ]; then
         rm -rf /var/run/nut
         rm -rf /var/state/ups
         rm -rf /etc/nutstats
-        if [ -f /boot/config/plugins/dynamix/nutstats.cron ]; then
-            rm -f /boot/config/plugins/dynamix/nutstats.cron
+        if [ -f /boot/config/plugins/dynamix/nutstats.cron ] || [ -f /boot/config/plugins/dynamix/nut-batttest.cron ]; then
+            rm -f /boot/config/plugins/dynamix/nutstats.cron /boot/config/plugins/dynamix/nut-batttest.cron
             sleep 1
             update_cron
             sleep 1
@@ -715,6 +739,9 @@ if [ -d /usr/local/emhttp/plugins/nut ]; then
     rm -rf /usr/local/emhttp/plugins/nut
 fi
 
+# the legacy 2.7.4 backend packages ship these directories as 0777
+chmod go-w /lib /lib/udev/rules.d /usr/libexec /usr/libexec/nut 2>/dev/null
+
 # reading our configuration
 echo "Reading NUT configuration..."
 if [ -e "$CONFIG" ]; then
@@ -724,23 +751,39 @@ fi
 # determine if config wants NUT services to start
 echo "Determining if NUT services should be started..."
 
+# The restart safety check scheduled before the upgrade (first step) stays armed until NUT monitors again: only a
+# start that succeeds cancels it, a failed or deferred one leaves it to restart NUT 10 minutes after the upgrade began.
+shopt -s nullglob
+SAFETYNETS=(/var/run/nut3-upgrade-restart.*)
+shopt -u nullglob
+
+start_nut() {
+    echo "Starting NUT services..."
+    /etc/rc.d/rc.nut start 2>&amp;1 | logger -t "rc.nut"
+    if [ "${PIPESTATUS[0]}" -eq 0 ] &amp;&amp; pgrep -x upsmon >/dev/null 2>&amp;1; then
+        echo "NUT services have been started successfully."
+        rm -f "${SAFETYNETS[@]}"
+    else
+        echo "WARNING: NUT services failed to start, check your configuration and the SYSLOG."
+        [ "${#SAFETYNETS[@]}" -eq 0 ] || echo "WARNING: NUT will be started again 10 minutes after the upgrade began, unless it runs by then."
+    fi
+}
+
 if [ "$MODE" != "slave" ] &amp;&amp; [ "$DRIVER" == "snmp-ups" ]; then
     if [ "$SERVICE" == "enable" ]; then
         echo "SNMP driver is configured, starting NUT services in background instead (see SYSLOG)..."
-        at -M now &lt;&lt;&lt; "/etc/rc.d/rc.nut start 2>&amp;1 | logger -t \"rc.nut\""
+        # the background job cancels the safety check itself, and only when NUT really runs
+        if ! at -M now &lt;&lt;&lt; "{ { [ ! -f $CONFIG ] || ( . $CONFIG; [ \"\${SERVICE:-}\" != disable ] ); } &amp;&amp; /etc/rc.d/rc.nut start 2>&amp;1 &amp;&amp; pgrep -x upsmon >/dev/null 2>&amp;1 &amp;&amp; rm -f ${SAFETYNETS[*]}; } | logger -t \"rc.nut\""; then
+            echo "WARNING: The background start could not be scheduled, starting NUT services now instead..."
+            start_nut
+        fi
     elif [ "$STATISTICS" == "enable" ]; then
         echo "SNMP driver is configured, starting NUT statistic services in background instead (see SYSLOG)..."
         at -M now &lt;&lt;&lt; "/etc/rc.d/rc.nutstats check 2>&amp;1 | logger -t \"rc.nutstats\""
     fi
 else
     if [ "$SERVICE" == "enable" ]; then
-        echo "Starting NUT services..."
-        /etc/rc.d/rc.nut start 2>&amp;1 | logger -t "rc.nut"
-        if [ "${PIPESTATUS[0]}" -eq 0 ]; then
-            echo "NUT services have been started successfully."
-        else
-            echo "WARNING: NUT services failed to start, check your configuration and the SYSLOG."
-        fi
+        start_nut
     elif [ "$STATISTICS" == "enable" ]; then
         echo "Starting NUT statistic services..."
         /etc/rc.d/rc.nutstats check 2>&amp;1 | logger -t "rc.nutstats"
@@ -751,6 +794,9 @@ else
         fi
     fi
 fi
+
+# the settings do not want NUT services (they were stopped above and stay stopped): there is nothing to restart
+[ "$SERVICE" == "enable" ] || rm -f "${SAFETYNETS[@]}"
 
 echo ""
 echo "-----------------------------------------------------------"
@@ -811,8 +857,8 @@ rm -rf /var/run/nut
 rm -rf /var/state/ups
 
 rm -rf /etc/nutstats
-if [ -f /boot/config/plugins/dynamix/nutstats.cron ]; then
-    rm -f /boot/config/plugins/dynamix/nutstats.cron
+if [ -f /boot/config/plugins/dynamix/nutstats.cron ] || [ -f /boot/config/plugins/dynamix/nut-batttest.cron ]; then
+    rm -f /boot/config/plugins/dynamix/nutstats.cron /boot/config/plugins/dynamix/nut-batttest.cron
     sleep 1
     update_cron
     sleep 1

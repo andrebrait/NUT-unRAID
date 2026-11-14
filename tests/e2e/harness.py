@@ -134,7 +134,8 @@ def install(root, work):
     for name, directory in STUBS.items():
         shutil.copy(HERE / "stubs" / name, root / directory / name)
         (root / directory / name).chmod(0o755)
-    # stand-in daemon: `pgrep -x upsmon` matches the executable's name, so a copy of sleep named upsmon
+    # stand-in daemon: `pgrep -x upsmon` and the pages' /proc/<pid>/comm check match the executable's name, so a
+    # copy of sleep named upsmon (stubs/upsmon writes its pidfile)
     sleep = next(p for p in (root / "usr/bin/sleep", root / "bin/sleep") if p.exists())
     (root / "usr/libexec/nut-e2e").mkdir(parents=True)
     shutil.copy(sleep, root / "usr/libexec/nut-e2e/upsmon")

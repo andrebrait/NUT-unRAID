@@ -165,14 +165,16 @@ check($decoded('CUSTOM_NUT') === 'UPSD_OPTIONS="-D"', 'extra nut.conf directive 
 check($decoded('CUSTOM_UPSSCHED') === "CMDSCRIPT /etc/nut/upssched-cmd\nAT ONBATT * START-TIMER onbatt 30", 'upssched.conf kept');
 check(has($notes, 'more than one UPS section') && has($notes, 'Manual configuration mode'), 'import notes reported');
 $errors = nut_mc_validate($c);
-check(count($errors) === 6, 'customised import conflicts: ' . implode(' | ', $errors));
-foreach (['ups.conf (UPS section) directives, line 3: "port"', '[spare]', 'line 5: "driver"', 'line 6: "port"', 'user [remote]', '"NOTIFYFLAG"'] as $needle) {
+check(count($errors) === 3, 'customised import conflicts: ' . implode(' | ', $errors));
+foreach (['ups.conf (UPS section) directives, line 3: "port"', 'user [remote]', '"NOTIFYFLAG"'] as $needle) {
     check(has($errors, $needle), "customised import reports $needle");
 }
-$c['CUSTOM_UPS'] = $b("vendorid = \"051D\"\ndesc = \"Rack UPS 1\"\n");
+check(!has($errors, '[spare]') && !has($errors, 'line 5') && !has($errors, 'line 6'), 'the additional UPS section is not a conflict');
+$c['CUSTOM_UPS'] = $b("vendorid = \"051D\"\ndesc = \"Rack UPS 1\"\n[spare]\ndriver = nutdrv_qx\nport = auto\n");
 $c['CUSTOM_USERS'] = $b("[homeassistant]\npassword = ha\nupsmon slave\n");
 $c['CUSTOM_UPSMON'] = $b("NOTIFYFLAG LOWBATT SYSLOG+EXEC\nFINALDELAY 10\n");
 check(nut_mc_validate($c) === [], 'resolved import is valid: ' . implode(' | ', nut_mc_validate($c)));
+check(strpos(nut_mc_generate($c)['upsmon.conf'], "MONITOR spare@127.0.0.1 0 monuser \"Mon1tor!\" slave\n") !== false, 'the additional UPS is monitored without a say in shutdowns');
 
 // Manual mode as a slave: the monitor comes from upsmon.conf, the unused server files are not imported
 [$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'MODE' => 'slave'], [
@@ -182,6 +184,50 @@ check(nut_mc_validate($c) === [], 'resolved import is valid: ' . implode(' | ', 
 ]);
 check($c['NAME'] === 'ippon_ups' && $c['IPADDR'] === '10.0.0.5:3493' && $c['MONUSER'] === 'remote' && nut_mc_decode($c['MONPASS']) === 'R3mote', 'slave monitor imported from upsmon.conf');
 check($c['CUSTOM_UPS'] === '' && $c['CUSTOM_USERS'] === '' && has($notes, 'Slave mode') && nut_mc_validate($c) === [], 'slave import ignores the server files');
+
+// upssched.conf of the nut-dw backend: rewritten from the settings at every start except in manual mode, which left the file
+// alone. There the generated lines are generated again from the settings and the user's own lines are kept.
+$schedFile = fn(array $lines) => "# Written by the NUT plugin from the GUI settings (not in manual mode).\n" . implode("\n", $lines) . "\n";
+$directives = ['CMDSCRIPT /usr/sbin/nut-upssched-cmd', 'PIPEFN /var/run/nut/upssched.pipe', 'LOCKFN /var/run/nut/upssched.lock'];
+$alert = ['AT ONBATT ups@127.0.0.1 START-TIMER alert:ups@127.0.0.1 45', 'AT ONLINE ups@127.0.0.1 CANCEL-TIMER alert:ups@127.0.0.1 online:ups@127.0.0.1'];
+$early = ['AT ONBATT ups@127.0.0.1 START-TIMER early:ups@127.0.0.1 20', 'AT ONLINE ups@127.0.0.1 CANCEL-TIMER early:ups@127.0.0.1'];
+$mine = 'AT ONBATT * START-TIMER mine 10';
+$importSched = fn($manual, array $settings, array $lines) => nut_mc_import(array_merge(['MANUAL' => $manual, 'MONPASS' => $b('monpass')], $settings), [
+    'upsmon.conf' => "MONITOR ups@127.0.0.1 1 monuser monpass master\n",
+    'upssched.conf' => $schedFile($lines),
+]);
+
+// nothing but generated lines: they come back from the settings, once
+[$c, $notes] = $importSched('enable', ['ONBATTDELAY' => '45', 'EARLYSTAGE' => '20'], array_merge($directives, $alert, $early));
+check($c['CUSTOM_UPSSCHED'] === '' && nut_mc_validate($c) === [], 'manual mode: a generated upssched.conf is not kept as custom directives: ' . implode(' | ', nut_mc_validate($c)));
+$sched = nut_mc_generate($c)['upssched.conf'];
+check(substr_count($sched, 'CMDSCRIPT') === 1 && substr_count($sched, "START-TIMER alert:ups@127.0.0.1 45\n") === 1 && substr_count($sched, "START-TIMER early:ups@127.0.0.1 20\n") === 1,
+    'manual mode: the timers are generated once from the settings');
+
+// the user's own line next to the generated ones is kept, the generated ones are not: only the user's line conflicts with the timers
+[$c, $notes] = $importSched('enable', ['ONBATTDELAY' => '45'], array_merge($directives, $alert, [$mine]));
+check(nut_mc_decode($c['CUSTOM_UPSSCHED']) === $mine, 'manual mode: the user\'s own upssched.conf line survives the import');
+$errors = nut_mc_validate($c);
+check(count($errors) === 1 && has($errors, 'upssched.conf directives, line 1: "AT"'), 'manual mode: only the user\'s line conflicts with the generated timers: ' . implode(' | ', $errors));
+
+// no timer set, so nothing is generated: the file stays together, the user's lines need its CMDSCRIPT
+[$c] = $importSched('enable', [], array_merge($directives, [$mine]));
+check(nut_mc_decode($c['CUSTOM_UPSSCHED']) === implode("\n", array_merge($directives, [$mine])) && nut_mc_validate($c) === [], 'manual mode: without timers the whole file is kept and valid');
+$sched = nut_mc_generate($c)['upssched.conf'];
+check(substr_count($sched, 'CMDSCRIPT /usr/sbin/nut-upssched-cmd') === 1 && substr_count($sched, "$mine\n") === 1, 'manual mode: without timers the kept CMDSCRIPT and the user\'s line are written as they were');
+[$c] = $importSched('enable', [], $directives);
+check($c['CUSTOM_UPSSCHED'] === '', 'manual mode: a header with only the generated directives and no timers holds nothing of the user\'s');
+
+// a timer delay that differs from the settings was edited by hand: it is kept and reported, not replaced silently
+[$c] = $importSched('enable', ['ONBATTDELAY' => '45'], array_merge($directives, ['AT ONBATT ups@127.0.0.1 START-TIMER alert:ups@127.0.0.1 30'], array_slice($alert, 1)));
+check(nut_mc_decode($c['CUSTOM_UPSSCHED']) === 'AT ONBATT ups@127.0.0.1 START-TIMER alert:ups@127.0.0.1 30' && has(nut_mc_validate($c), '"AT"'),
+    'manual mode: a timer with another delay than the setting is kept and reported');
+
+// without manual mode the backend rewrote the file at every start: nothing in it was the user's
+foreach (['disable', 'onlyups'] as $manual) {
+    [$c] = $importSched($manual, ['ONBATTDELAY' => '45'], array_merge($directives, $alert, [$mine]));
+    check($c['CUSTOM_UPSSCHED'] === '' && nut_mc_validate($c) === [], "$manual mode: a rewritten upssched.conf is regenerated, not kept");
+}
 
 // Deployment: import keeps the old files until the user saves, then generates with backups
 $dir = sys_get_temp_dir() . '/nut-mc-' . getmypid();

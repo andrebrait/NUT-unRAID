@@ -23,12 +23,25 @@ CONFIG=$PLGPATH/nut3.cfg
 # read our configuration
 [ -e "$CONFIG" ] && source $CONFIG
 
+# the copy holds the UPS passwords: it is written as a private (0600) temp file beside it and renamed over the old one, so a
+# failed install keeps the previous copy, readers never see a partial file and a looser old file is never rewritten in place
+copy_stats_config() {
+    local tmp
+    tmp="$(mktemp /etc/nutstats/.nut3.cfg.XXXXXX)" || { echo "Error: could not create a temporary settings copy for the statistics, keeping the previous one..."; return 1; }
+    if install -m 600 "$CONFIG" "$tmp" && mv -f "$tmp" /etc/nutstats/nut3.cfg; then
+        return 0
+    fi
+    rm -f "$tmp"
+    echo "Error: could not update the settings copy for the statistics, keeping the previous one..."
+    return 1
+}
+
 enable_nutstats() {
 echo "Enabling the NUT Runtime Statistics Module..."
     if [ ! -d /etc/nutstats ]; then
         mkdir /etc/nutstats
 
-        cp -f $CONFIG /etc/nutstats/
+        copy_stats_config
         cp -rf $DOCROOT/nutstats-defaults/* /etc/nutstats/
 
         rm -rf $DOCROOT/nutstats
@@ -41,7 +54,8 @@ echo "Enabling the NUT Runtime Statistics Module..."
             monitorVarsOR=("${STATSCHART1VAR}" "${STATSCHART2VAR}" "${STATSCHART3VAR}" "${STATSCHART4VAR}" "${STATSCHART5VAR}" "${STATSCHART6VAR}" "${STATSCHART7VAR}")
 
             for i in "${monitorVarsOR[@]}"; do
-                if [ -z "${i// }" ]; then
+                # names become file paths below, so only allow NUT variable characters
+                if [ -z "${i// }" ] || [[ ! "$i" =~ ^[A-Za-z0-9._-]+$ ]] || [[ "$i" == *..* ]]; then
                   variableTestSuccess="NO"
                 fi
             done
@@ -68,8 +82,7 @@ echo "Enabling the NUT Runtime Statistics Module..."
 
         chmod 755 /etc/nutstats
         chown root:root /etc/nutstats/*
-        chmod 644 /etc/nutstats/*
-        chown root:root /etc/nutstats/*
+        chmod 644 /etc/nutstats/*.json
 
         cp -f  $DOCROOT/misc/nutstats.cron /boot/config/plugins/dynamix/nutstats.cron
 
@@ -95,9 +108,10 @@ echo "Enabling the NUT Runtime Statistics Module..."
         update_cron
         sleep 1
         echo "NUT Runtime Statistics is requesting the first batch of data..."
-        /usr/sbin/nutstats 2>/dev/null
+        # in the background, so a hung upsd cannot stall rc.nut
+        ( timeout 120 /usr/sbin/nutstats >/dev/null 2>&1 & )
     else
-        cp -f $CONFIG /etc/nutstats/
+        copy_stats_config
     fi
 }
 
