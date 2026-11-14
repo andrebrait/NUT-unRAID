@@ -1,0 +1,85 @@
+#!/bin/bash
+#
+# Scheduled UPS battery self-test (started from cron, see rc.nut).
+# Usage: nut-batttest [ups-name] [quick|deep]   (defaults come from the plugin settings)
+#
+# Copyright desertwitch (as author and maintainer of this file)
+# Based on David Coulson's NUT-unRAID fork.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License 2
+# as published by the Free Software Foundation.
+#
+
+PLGPATH="/boot/config/plugins/nut3"
+CONFIG="$PLGPATH/nut3.cfg"
+NOTIFY="/usr/local/emhttp/plugins/dynamix/scripts/notify"
+HOST="$(echo "$HOSTNAME" | awk '{print toupper($0)}')"
+
+main() {
+    [ -e "$CONFIG" ] && source "$CONFIG"
+
+    local ups="${1:-${BATTTESTUPS:-$NAME}}" type="${2:-${BATTTESTTYPE:-quick}}" host cmd target
+    if [[ ! "$ups" =~ ^[A-Za-z0-9._-]+$ ]] || [[ ! "$type" =~ ^(quick|deep)$ ]]; then
+        echo "nut-batttest: invalid UPS name or test type." | logger -t "nut-batttest[$$]"; exit 1
+    fi
+    cmd="test.battery.start.$type"
+    [ "$ups" == "$NAME" ] && host="${IPADDR:-127.0.0.1}" || host="127.0.0.1"
+    target="${ups}@${host}"
+
+    log() { echo "[$target] $*" | logger -t "nut-batttest[$$]"; }
+    notify() { timeout -s9 15 "$NOTIFY" -e "UPS Status" -s "$2 [${HOST}] NUT: [${target}] Battery Self-Test" -d "$3" -i "$1"; }
+
+    local status charge
+    # no status means the UPS is gone (renamed or removed), unreachable or stale: the schedule can never run, so say so
+    if ! status="$(timeout 10 upsc "$target" ups.status 2>/dev/null)" || [ -z "$status" ]; then
+        local why
+        why="$(timeout 10 upsc "$target" ups.status 2>&1 >/dev/null | tail -n 1)"
+        log "Skipped, the UPS is not available: ${why:-no answer}."
+        notify warning Warning "The scheduled $type battery self-test was skipped: the UPS is not available (${why:-no answer}). Check that it still exists on the NUT Settings page and that NUT is running."; exit 1
+    fi
+    charge="$(timeout 10 upsc "$target" battery.charge 2>/dev/null)"
+    if [[ " $status " != *" OL "* ]]; then log "Skipped, UPS status is '$status' (not OL)."; exit 0; fi
+    if [[ ! "$charge" =~ ^[0-9]+([.][0-9]+)?$ ]] || [ "${charge%.*}" -lt 90 ]; then
+        log "Skipped, battery charge is '${charge:-unknown}' (needs 90% or more)."; exit 0
+    fi
+    if ! timeout 10 upscmd -l "$target" 2>/dev/null | awk -v c="$cmd" '$1 == c { f = 1 } END { exit !f }'; then
+        log "Skipped, UPS does not support $cmd."; exit 0
+    fi
+
+    # the NUT Admin account of the settings (the NUT Commands page uses it too); ADMINPASS is base64
+    local user="$ADMINUSER" pass
+    pass="$(echo "$ADMINPASS" | base64 --decode 2>/dev/null)"
+    if [ -z "$user" ] || [ -z "$pass" ]; then
+        log "Skipped, no NUT Admin user and password are set on the NUT Settings page."
+        notify warning Warning "The scheduled $type battery self-test was skipped: no NUT Admin user and password are set on the NUT Settings page."; exit 1
+    fi
+
+    local old out
+    old="$(timeout 10 upsc "$target" ups.test.result 2>/dev/null)"
+    if ! out="$(timeout 30 upscmd -u "$user" -p "$pass" "$target" "$cmd" 2>&1)"; then
+        out="${out//"$pass"/***}"
+        log "Could not start $cmd: $out"
+        notify warning Warning "The $type battery self-test could not be started: $out"; exit 1
+    fi
+    log "Started $cmd."
+
+    # poll up to 10 minutes; an unchanged result only counts as new once the test was seen running or 60s passed
+    local t=0 seen=0 res=""
+    while [ "$t" -lt 600 ]; do
+        sleep 10; t=$((t + 10))
+        res="$(timeout 10 upsc "$target" ups.test.result 2>/dev/null)"
+        if [[ "${res,,}" == *progress* ]]; then seen=1; continue; fi
+        if [ -n "$res" ] && { [ "$seen" = 1 ] || [ "$res" != "$old" ] || [ "$t" -ge 60 ]; }; then break; fi
+        res=""
+    done
+
+    log "Result: ${res:-none within 10 minutes}"
+    if [[ "${res,,}" == *passed* ]]; then
+        notify normal Notice "The $type battery self-test finished: $res."
+    else
+        notify warning Warning "The $type battery self-test did not pass: ${res:-no result within 10 minutes}."
+    fi
+}
+
+if [ "${BASH_SOURCE[0]}" == "$0" ]; then main "$@"; fi

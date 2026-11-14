@@ -41,6 +41,24 @@ const NUT_MC_MIBS = ['ietf', 'apc_ats', 'apc_pdu', 'apc', 'apcc', 'baytech', 'be
 // the settings file is written by /update.php as KEY="value" and sourced by bash scripts
 const NUT_MC_UNSAFE = '/[\x00-\x1f\x7f"\\\\$`]/';
 const NUT_MC_ID = '/^[A-Za-z0-9_.-]{1,64}$/';
+// numeric settings: key => [min, max, label]
+const NUT_MC_INTS = [
+    'NOCOMMWARNTIME' => [1, 86400, 'NUT Monitor No Communication Warning Time'],
+    'FINALDELAY'     => [0, 3600, 'NUT Monitor Final Delay'],
+    'HOSTSYNC'       => [1, 3600, 'NUT Monitor Host Sync Time'],
+    'RBWARNTIME'     => [1, 31536000, 'NUT Monitor Replace Battery Warning Time'],
+    'ONBATTDELAY'    => [0, 86400, 'On Battery Alert Delay'],
+    'EARLYSTAGE'     => [0, 86400, 'Early Stage Hook Delay'],
+    'BATTTESTWDAY'   => [0, 6, 'Battery Self-Test Weekday'],
+    'BATTTESTMDAY'   => [1, 28, 'Battery Self-Test Day of Month'],
+    'BATTTESTHOUR'   => [0, 23, 'Battery Self-Test Hour'],
+];
+// upsmon.conf directives the settings supply by default. A custom directive with the same key replaces
+// them, because files that set them by hand were valid before and must stay so after an upgrade.
+const NUT_MC_UPSMON_TIMERS = ['NOCOMMWARNTIME', 'FINALDELAY', 'HOSTSYNC', 'RBWARNTIME'];
+const NUT_MC_UPSMON_EVENTS = ['LOWBATT', 'FSD', 'COMMBAD', 'COMMOK', 'NOCOMM', 'SHUTDOWN'];
+// first line of the upssched.conf that the nut-dw backend rewrote completely from its settings
+const NUT_MC_LEGACY_SCHED = '# Written by the NUT plugin from the GUI settings';
 
 function nut_mc_read_cfg($path) {
     $cfg = is_file($path) ? parse_ini_file($path, false, INI_SCANNER_RAW) : [];
@@ -166,6 +184,19 @@ function nut_mc_key($file, array $words) {
     return $key;
 }
 
+/* Names of the additional UPS sections in the UPS-section custom directives (slave mode runs no driver). */
+function nut_mc_extra_ups(array $c) {
+    if ($c['MODE'] === 'slave') return [];
+    $headers = array_filter(nut_mc_parse(nut_mc_custom($c, 'CUSTOM_UPS')), fn($d) => $d['header']);
+    return array_values(array_unique(array_column($headers, 'section')));
+}
+
+/* UPS name of a MONITOR system ("name@host[:port]") that this machine serves itself, null for any other system. */
+function nut_mc_local_ups($system) {
+    [$name, $host] = array_pad(explode('@', (string)$system, 2), 2, '');
+    return preg_match('/^(127\.0\.0\.1|localhost|\[?::1\]?)(:[0-9]+)?$/i', $host) ? $name : null;
+}
+
 function nut_mc_generate(array $c, $withCustom = true) {
     $block = function ($key, $title = 'Custom directives') use ($c, $withCustom) {
         $text = $withCustom ? nut_mc_custom($c, $key) : '';
@@ -208,15 +239,58 @@ function nut_mc_generate(array $c, $withCustom = true) {
         $files['upsd.users'] .= $block('CUSTOM_USERS');
     }
 
+    // directives the custom field replaces (see NUT_MC_UPSMON_TIMERS), and the local UPSes whose MONITOR line it holds
+    $own = [];
+    $ownUps = [];
+    foreach (nut_mc_parse($withCustom ? nut_mc_custom($c, 'CUSTOM_UPSMON') : '') as $d) {
+        $own[nut_mc_key('upsmon.conf', $d['words'])] = true;
+        if (!$d['error'] && strtoupper($d['words'][0] ?? '') === 'MONITOR' && ($name = nut_mc_local_ups($d['words'][1] ?? '')) !== null) $ownUps[$name] = true;
+    }
+    // The additional UPSes are only watched: power value 0 keeps them out of the shutdown decision, and slave keeps
+    // upsmon from raising FSD on them (and on the clients attached to them) when this system shuts down.
+    $watched = '';
+    foreach ($withCustom ? nut_mc_extra_ups($c) : [] as $name) {
+        if (!isset($ownUps[$name])) $watched .= "MONITOR $name@{$c['IPADDR']} 0 {$c['MONUSER']} " . nut_mc_quote(nut_mc_decode($c['MONPASS'])) . " slave\n";
+    }
+    $defaults = '';
+    foreach (NUT_MC_UPSMON_TIMERS as $key) {
+        if (!isset($own[strtolower($key)])) $defaults .= "$key {$c[$key]}\n";
+    }
+    foreach (NUT_MC_UPSMON_EVENTS as $event) {
+        if (!isset($own['notifyflag ' . strtolower($event)])) $defaults .= "NOTIFYFLAG $event SYSLOG+EXEC\n";
+    }
+
     $files['upsmon.conf'] .= "MONITOR {$c['NAME']}@{$c['IPADDR']} 1 {$c['MONUSER']} "
         . nut_mc_quote(nut_mc_decode($c['MONPASS'])) . ($slave ? ' slave' : ' master') . "\n"
+        . $watched
         . "SHUTDOWNCMD \"/sbin/poweroff\"\n"
         . 'POWERDOWNFLAG "/etc/nut/' . ($c['UPSKILL'] === 'enable' ? 'killpower' : 'no_killpower') . "\"\n"
         . "NOTIFYCMD \"/usr/sbin/nut-notify\"\n"
+        . $defaults
         . "NOTIFYFLAG ONBATT SYSLOG+EXEC\nNOTIFYFLAG ONLINE SYSLOG+EXEC\nNOTIFYFLAG REPLBATT SYSLOG+EXEC\n"
         . ($c['DEBLEVELMON'] !== 'default' ? "DEBUG_MIN {$c['DEBLEVELMON']}\n" : '')
         . $block('CUSTOM_UPSMON');
 
+    // on-battery alert delay and EARLY_STAGE hook: upssched timers for every monitored UPS (nut-notify feeds the events)
+    if ((int)$c['ONBATTDELAY'] > 0 || (int)$c['EARLYSTAGE'] > 0) {
+        $files['upssched.conf'] .= "CMDSCRIPT /usr/sbin/nut-upssched-cmd\nPIPEFN /var/run/nut/upssched.pipe\nLOCKFN /var/run/nut/upssched.lock\n";
+        $word = fn($w) => preg_match('/^[A-Za-z0-9._@:\[\]-]+$/', $w) ? $w : nut_mc_quote($w);
+        $systems = [];
+        foreach (nut_mc_parse($files['upsmon.conf']) as $d) {
+            if (!$d['error'] && strtoupper($d['words'][0] ?? '') === 'MONITOR' && isset($d['words'][1])) $systems[] = $d['words'][1];
+        }
+        foreach (array_unique($systems) as $ups) {
+            if ((int)$c['ONBATTDELAY'] > 0) {
+                $files['upssched.conf'] .= 'AT ONBATT ' . $word($ups) . ' START-TIMER ' . $word("alert:$ups") . " {$c['ONBATTDELAY']}\n";
+                // a timer that already fired (the alert was sent) is not found, so CANCEL-TIMER runs the online command
+                $files['upssched.conf'] .= 'AT ONLINE ' . $word($ups) . ' CANCEL-TIMER ' . $word("alert:$ups") . ' ' . $word("online:$ups") . "\n";
+            }
+            if ((int)$c['EARLYSTAGE'] > 0) {
+                $files['upssched.conf'] .= 'AT ONBATT ' . $word($ups) . ' START-TIMER ' . $word("early:$ups") . " {$c['EARLYSTAGE']}\n";
+                $files['upssched.conf'] .= 'AT ONLINE ' . $word($ups) . ' CANCEL-TIMER ' . $word("early:$ups") . "\n";
+            }
+        }
+    }
     $files['upssched.conf'] .= $block('CUSTOM_UPSSCHED');
     return $files;
 }
@@ -291,6 +365,16 @@ function nut_mc_validate(array $c) {
     }
     if (!preg_match('/^(default|[1-6])$/', $c['DEBLEVELMON'])) $errors[] = 'NUT Monitor Debug Level: invalid value.';
     if (!in_array($c['UPSKILL'], ['enable', 'disable'], true)) $errors[] = 'Disable UPS Power after Shutdown: invalid value.';
+    foreach (NUT_MC_INTS as $key => [$min, $max, $label]) {
+        if (!preg_match('/^(0|[1-9][0-9]{0,9})$/', $c[$key]) || $c[$key] < $min || $c[$key] > $max) {
+            $errors[] = "$label: enter a whole number from $min to $max.";
+        }
+    }
+    if (!in_array($c['BATTTEST'], ['disable', 'weekly', 'monthly'], true)) $errors[] = 'Battery Self-Test: invalid value.';
+    if (!in_array($c['BATTTESTTYPE'], ['quick', 'deep'], true)) $errors[] = 'Battery Self-Test Type: invalid value.';
+    if ($c['BATTTESTUPS'] !== '' && !preg_match(NUT_MC_ID, $c['BATTTESTUPS'])) $errors[] = 'Battery Self-Test UPS: use 1-64 letters, digits, "_", "." or "-".';
+    // nut-batttest starts the test with the NUT Admin account, like the NUT Commands page
+    if ($c['BATTTEST'] !== 'disable' && $c['ADMINUSER'] === '') $errors[] = 'Battery Self-Test: set the NUT Admin Username and Password, the test is started with that account.';
     if ($errors) return $errors;
 
     $base = nut_mc_generate($c, false);
@@ -303,8 +387,10 @@ function nut_mc_validate(array $c) {
         }
         $managed = [];
         foreach (nut_mc_parse($base[$file]) as $d) {
-            if (!$d['header'] && ($key !== 'CUSTOM_UPSGLOBAL' || $d['section'] === null)) $managed[nut_mc_key($file, $d['words'])] = true;
+            $key2 = nut_mc_key($file, $d['words']);
+            if (!$d['header'] && ($key !== 'CUSTOM_UPSGLOBAL' || $d['section'] === null) && !($file === 'upsmon.conf' && nut_mc_replaceable($key2))) $managed[$key2] = true;
         }
+        $extra = []; // additional UPS sections of the UPS-section field => their directives
         foreach (nut_mc_parse(nut_mc_custom($c, $key)) as $d) {
             $where = "Custom $label directives, line {$d['line']}";
             if (preg_match('/[^\x20-\x7e\t]/', $d['raw'])) {
@@ -312,13 +398,34 @@ function nut_mc_validate(array $c) {
             } elseif ($d['error']) {
                 $errors[] = "$where: {$d['error']}.";
             } elseif ($d['header'] && $file === 'ups.conf') {
-                $errors[] = "$where: only one UPS is supported, remove the section [{$d['section']}].";
+                $name = $d['section'];
+                if ($key !== 'CUSTOM_UPS') {
+                    $errors[] = "$where: remove the section [$name], additional UPSes belong in the ups.conf (UPS section) custom directives.";
+                } elseif (!preg_match(NUT_MC_ID, $name)) {
+                    $errors[] = "$where: the UPS section name [$name] must use 1-64 letters, digits, \"_\", \".\" or \"-\".";
+                } elseif ($name === $c['NAME'] || isset($extra[$name])) {
+                    $errors[] = "$where: the UPS [$name] is already defined" . ($name === $c['NAME'] ? ' by the UPS Name setting' : '') . ', use another name.';
+                } else {
+                    $extra[$name] = [];
+                }
             } elseif ($d['header'] && $file === 'upsd.users' && in_array($d['section'], $generatedUsers, true)) {
                 $errors[] = "$where: user [{$d['section']}] is generated from the settings above and cannot be redefined here.";
             } elseif (!$d['header'] && $file === 'upsd.users' && $d['section'] === null) {
                 $errors[] = "$where: start with a [username] section, otherwise the directive is added to a generated user.";
-            } elseif (!$d['header'] && $file !== 'upsd.users' && isset($managed[nut_mc_key($file, $d['words'])])) {
+            } elseif (!$d['header'] && $file === 'ups.conf' && strncmp((string)($d['words'][0] ?? ''), '[', 1) === 0) {
+                $errors[] = "$where: \"{$d['words'][0]}\" is not a valid UPS section header, use [name] alone on a line.";
+            } elseif (!$d['header'] && $file !== 'upsd.users' && !($key === 'CUSTOM_UPS' && $d['section'] !== null) && isset($managed[nut_mc_key($file, $d['words'])])) {
                 $errors[] = "$where: \"{$d['words'][0]}\" is set from the settings above and cannot be overridden here.";
+            }
+            if ($key === 'CUSTOM_UPS' && !$d['header'] && !$d['error'] && isset($extra[$d['section']]) && count($d['words']) === 3 && $d['words'][1] === '=') {
+                $extra[$d['section']][strtolower($d['words'][0])] = $d['words'][2];
+            }
+        }
+        foreach ($extra as $name => $have) {
+            if (!isset($have['driver'], $have['port'])) {
+                $errors[] = "Custom $label directives: the UPS [$name] needs both a \"driver\" and a \"port\" directive.";
+            } elseif (!preg_match('/^[A-Za-z0-9_-]{1,64}$/', $have['driver'])) {
+                $errors[] = "Custom $label directives: the UPS [$name] needs a valid driver name.";
             }
         }
     }
@@ -378,7 +485,16 @@ function nut_mc_section_driver(array $entries, $section) {
     return null;
 }
 
-function nut_mc_upsmon_directive(array $d, array &$set, array &$taken) {
+/* Directives of upsmon.conf that only default from the settings and that a custom directive may replace. */
+function nut_mc_replaceable($key) {
+    foreach (NUT_MC_UPSMON_EVENTS as $event) {
+        if ($key === 'notifyflag ' . strtolower($event)) return true;
+    }
+    return in_array($key, array_map('strtolower', NUT_MC_UPSMON_TIMERS), true);
+}
+
+/* $legacyTimers: the timer settings the old backend wrote into upsmon.conf, so those lines hold no user input. */
+function nut_mc_upsmon_directive(array $d, array &$set, array &$taken, array $legacyTimers = []) {
     $w = $d['words'];
     if ($d['error']) return false;
     $key = nut_mc_key('upsmon.conf', $w);
@@ -403,6 +519,16 @@ function nut_mc_upsmon_directive(array $d, array &$set, array &$taken) {
         case 'debug_min':
             if ($count !== 2 || !preg_match('/^[1-6]$/', $w[1])) return false;
             $set['DEBLEVELMON'] = $w[1];
+            break;
+        case 'nocommwarntime':
+        case 'finaldelay':
+        case 'hostsync':
+        case 'rbwarntime':
+            // a line the old backend did not write is the user's own and stays a custom directive
+            $name = strtoupper($w[0]);
+            if (!in_array($name, $legacyTimers, true) || $count !== 2 || !preg_match('/^[0-9]{1,10}$/', $w[1])
+                || $w[1] < NUT_MC_INTS[$name][0] || $w[1] > NUT_MC_INTS[$name][1]) return false;
+            $set[$name] = $w[1];
             break;
         default:
             return false;
@@ -450,26 +576,33 @@ function nut_mc_import(array $cfg, array $files) {
         $notes[] = 'Manual configuration mode was enabled. Your configuration files were imported into the settings and custom directive fields; check them carefully.';
     }
 
+    $others = []; // the other UPS sections of ups.conf: name => its raw lines, header first
     if (!$slave) {
         $entries = $parse('ups.conf');
         $sections = array_values(array_unique(array_column(array_filter($entries, fn($d) => $d['header']), 'section')));
-        $pick = in_array($c['NAME'], $sections, true) ? $c['NAME'] : ($sections[0] ?? null);
+        $wanted = $c['NAME'];
+        $pick = in_array($wanted, $sections, true) ? $wanted : ($sections[0] ?? null);
         if ($pick === null) {
             $notes[] = 'ups.conf: no UPS section was found, the UPS driver settings were kept as they were.';
         } else {
             $found = ['NAME' => $pick];
             $taken = [];
+            $own = [];
             $snmp = nut_mc_section_driver($entries, $pick) === 'snmp-ups';
             foreach ($entries as $d) {
                 if ($d['section'] === null) {
                     $custom['CUSTOM_UPSGLOBAL'][] = $d['raw'];
-                } elseif ($d['section'] !== $pick || (!$d['header'] && !nut_mc_ups_directive($d, $found, $taken, $snmp))) {
-                    $custom['CUSTOM_UPS'][] = $d['raw'];
+                } elseif ($d['section'] !== $pick) {
+                    $others[$d['section']][] = $d['raw'];
+                } elseif (!$d['header'] && !nut_mc_ups_directive($d, $found, $taken, $snmp)) {
+                    $own[] = $d['raw'];
                 }
             }
+            // the UPS's own leftovers go first: written after another section's header they would join that section
+            $custom['CUSTOM_UPS'] = array_merge($own, ...array_values($others));
             $set('ups', $found);
-            if (count($sections) > 1) {
-                $notes[] = 'ups.conf: more than one UPS section was found, but only one UPS is supported. The other sections were moved to the custom directives and must be removed there.';
+            if ($others && $c['NAME'] !== $wanted) {
+                $notes[] = "ups.conf: the UPS \"$wanted\" of the settings has no section, \"{$c['NAME']}\" (the first section) is now the UPS that shuts this system down. Change the UPS Name setting to use another one.";
             }
         }
     }
@@ -478,6 +611,8 @@ function nut_mc_import(array $cfg, array $files) {
     $monitor = null;
     foreach ($entries as $d) {
         if ($d['error'] || count($d['words']) !== 6 || strtoupper($d['words'][0]) !== 'MONITOR') continue;
+        // the line of another UPS of ups.conf is not the shutdown UPS's: it stays a custom directive, credentials included
+        if (($local = nut_mc_local_ups($d['words'][1])) !== null && isset($others[$local])) continue;
         $monitor = $monitor ?? $d;
         if (explode('@', $d['words'][1])[0] === $c['NAME']) {
             $monitor = $d;
@@ -503,7 +638,7 @@ function nut_mc_import(array $cfg, array $files) {
     $found = [];
     $taken = [];
     foreach ($entries as $d) {
-        if ($d !== $monitor && !nut_mc_upsmon_directive($d, $found, $taken)) $custom['CUSTOM_UPSMON'][] = $d['raw'];
+        if ($d !== $monitor && !nut_mc_upsmon_directive($d, $found, $taken, array_intersect(NUT_MC_UPSMON_TIMERS, array_keys($cfg)))) $custom['CUSTOM_UPSMON'][] = $d['raw'];
     }
     $set('mon', $found);
 
@@ -533,6 +668,11 @@ function nut_mc_import(array $cfg, array $files) {
             }
         }
         $haveSlave = $haveAdmin = $haveMon = false;
+        // accounts that kept MONITOR lines log in with must survive, and standalone mode does not generate the slave user
+        $monitorUsers = [];
+        foreach (nut_mc_parse(implode("\n", $custom['CUSTOM_UPSMON'])) as $d) {
+            if (!$d['error'] && strtoupper($d['words'][0] ?? '') === 'MONITOR' && isset($d['words'][3])) $monitorUsers[$d['words'][3]] = true;
+        }
         foreach ($sections as $user => $entries) {
             $pass = $type = null;
             $rest = [];
@@ -558,7 +698,7 @@ function nut_mc_import(array $cfg, array $files) {
                 if ($pass !== nut_mc_decode($c['MONPASS'])) {
                     $notes[] = "upsd.users: the password of user \"$user\" differed from the one upsmon.conf uses, the upsmon.conf password is now used for both.";
                 }
-            } elseif (!$haveSlave && in_array($type, ['slave', 'secondary'], true)) {
+            } elseif (!$haveSlave && in_array($type, ['slave', 'secondary'], true) && !($mode === 'standalone' && isset($monitorUsers[$user]))) {
                 $haveSlave = true;
                 $set('mon', ['SLAVEUSER' => $user, 'SLAVEPASS' => base64_encode((string)$pass)]);
             } elseif ($type === null && $pass !== null && $rest && $adminOnly) {
@@ -595,13 +735,33 @@ function nut_mc_import(array $cfg, array $files) {
         }
         $custom['CUSTOM_NUT'][] = $d['raw'];
     }
-    $custom['CUSTOM_UPSSCHED'] = array_column($parse('upssched.conf'), 'raw');
+    // the nut-dw backend rewrote its upssched.conf from the settings at every start, so it holds nothing of the user's
+    $legacySched = strncmp((string)($files['upssched.conf'] ?? ''), NUT_MC_LEGACY_SCHED, strlen(NUT_MC_LEGACY_SCHED)) === 0;
+    $custom['CUSTOM_UPSSCHED'] = $legacySched ? [] : array_column($parse('upssched.conf'), 'raw');
 
     if (!$slave && $c['IPADDR'] !== '127.0.0.1') {
         if (!in_array(explode(':', $c['IPADDR'])[0], ['127.0.0.1', 'localhost'], true)) {
             $notes[] = "The local NUT monitor now connects to 127.0.0.1 instead of {$c['IPADDR']}.";
         }
         $c['IPADDR'] = '127.0.0.1';
+    }
+    if ($others) {
+        $monitored = []; // other UPS => power value of its MONITOR line, kept in the custom directives
+        foreach (nut_mc_parse(implode("\n", $custom['CUSTOM_UPSMON'])) as $d) {
+            $name = !$d['error'] && strtoupper($d['words'][0] ?? '') === 'MONITOR' ? nut_mc_local_ups($d['words'][1] ?? '') : null;
+            if ($name !== null && isset($others[$name])) $monitored[$name] = $d['words'][2] ?? '';
+        }
+        $notes[] = 'ups.conf: more than one UPS section was found. The other sections, [' . implode('], [', array_keys($others))
+            . "], were kept in the ups.conf (UPS section) custom directives; \"{$c['NAME']}\" is the UPS that shuts this system down.";
+        if ($watched = array_diff(array_keys($others), array_keys($monitored))) {
+            $notes[] = 'upsmon.conf: [' . implode('], [', $watched) . '] ' . (count($watched) > 1 ? 'are' : 'is')
+                . ' now only watched: the generated MONITOR line has power value 0, so no shutdown starts from it. A MONITOR line in the upsmon.conf custom directives replaces it.';
+        }
+        foreach ($monitored as $name => $power) {
+            if ($power !== '0') {
+                $notes[] = "upsmon.conf: the MONITOR line of UPS \"$name\" (power value $power) was kept as a custom directive. It counts as a power supply for upsmon (see MINSUPPLIES), use power value 0 to only watch that UPS.";
+            }
+        }
     }
     foreach ($custom as $key => $lines) {
         $c[$key] = $lines ? base64_encode(implode("\n", $lines) . "\n") : '';
@@ -632,9 +792,20 @@ function nut_mc_apply_scan(array $cfg, $text) {
             $c[$key] = $value;
         }
     }
-    $c['CUSTOM_UPS'] = $custom ? base64_encode(implode("\n", $custom) . "\n") : '';
+    // the additional UPS sections (from the first section header on) are the user's own and survive a scan
+    $old = nut_mc_custom($c, 'CUSTOM_UPS');
+    $keep = '';
+    foreach (nut_mc_parse($old) as $d) {
+        if ($d['header']) {
+            $keep = rtrim(implode("\n", array_slice(explode("\n", $old), $d['line'] - 1)), "\n");
+            break;
+        }
+    }
+    $lines = $keep === '' ? $custom : array_merge($custom, [$keep]);
+    $c['CUSTOM_UPS'] = $lines ? base64_encode(implode("\n", $lines) . "\n") : '';
     $msgs[] = "Applied device [$pick]: driver " . ($c['DRIVER'] === 'custom' ? $c['SERIAL'] : $c['DRIVER']) . ", port {$c['PORT']}.";
     $msgs[] = $custom ? 'The other detected details replaced the ups.conf (UPS section) custom directives.' : 'The ups.conf (UPS section) custom directives were cleared.';
+    if ($keep !== '') $msgs[] = 'The additional UPS sections in those custom directives were kept.';
     if (count($sections) > 1) $msgs[] = 'Other detected devices were ignored: [' . implode('], [', array_slice($sections, 1)) . '].';
     return [$c, $msgs];
 }

@@ -22,11 +22,11 @@ and sourced by the bash scripts. Values that `default.cfg` lacks fall back to it
 | File | Generated from | Custom field |
 | --- | --- | --- |
 | nut.conf | `MODE` (`slave` is written as `netclient`) | `CUSTOM_NUT` |
-| ups.conf | `NAME`, `DRIVER`/`SERIAL`, `PORT`, `DEBLEVEL`, and for snmp-ups also `POLL`, `COMMUNITY`, `SNMPVER`, `SNMPMIB` | `CUSTOM_UPSGLOBAL` (before the section), `CUSTOM_UPS` (inside it) |
+| ups.conf | `NAME`, `DRIVER`/`SERIAL`, `PORT`, `DEBLEVEL`, and for snmp-ups also `POLL`, `COMMUNITY`, `SNMPVER`, `SNMPMIB` | `CUSTOM_UPSGLOBAL` (before the section), `CUSTOM_UPS` (inside it; may add further UPS sections) |
 | upsd.conf | `LISTEN` in netserver mode, otherwise `127.0.0.1` | `CUSTOM_UPSD` |
 | upsd.users | `MONUSER`/`MONPASS` (upsmon master); `SLAVEUSER`/`SLAVEPASS` (upsmon slave, netserver only); `ADMINUSER`/`ADMINPASS` (SET, FSD, all instant commands, only if configured) | `CUSTOM_USERS` |
-| upsmon.conf | `NAME@IPADDR`, `MONUSER`/`MONPASS`, `UPSKILL` (power-down flag), `DEBLEVELMON`, plus the fixed shutdown command, notify command and notify flags | `CUSTOM_UPSMON` |
-| upssched.conf | nothing | `CUSTOM_UPSSCHED` |
+| upsmon.conf | `NAME@IPADDR`, `MONUSER`/`MONPASS`, `UPSKILL` (power-down flag), configured timers and notify flags; additional local UPSes are monitored with power value 0 and the `slave` role | `CUSTOM_UPSMON` |
+| upssched.conf | `ONBATTDELAY` and `EARLYSTAGE`: timers for every monitored UPS (`CMDSCRIPT`, `PIPEFN`, `LOCKFN` and `AT` lines), nothing while both are 0 | `CUSTOM_UPSSCHED` |
 
 Slave mode runs neither a driver nor upsd. In that mode `ups.conf`, `upsd.conf` and `upsd.users` contain
 only the header, and their custom fields are hidden and ignored.
@@ -52,11 +52,18 @@ is checked against those keys. Keys compare case-insensitively. The upsmon direc
 `NOTIFYFLAG ONBATT` is a conflict. A directive the settings do not currently emit, for example
 `debug_min` while the driver debug level is "Default", may go in the custom field. Further rules:
 
-- The `ups.conf` fields may not open another section, because only one UPS is supported.
+- `CUSTOM_UPSGLOBAL` may not open a section. `CUSTOM_UPS` may add UPS sections after the configured UPS's directives; each additional UPS needs a unique name, `driver` and `port`. Generated monitors use power value 0 and the `slave` role. A custom local `MONITOR` line replaces its generated monitor and may change shutdown behavior.
 - The `upsd.users` field must start with a `[user]` header. Otherwise its directives would join the last
   generated user. It may not redefine a generated user.
 - Custom text must be printable ASCII and must tokenise cleanly. NUT drops other bytes and rejects
   unterminated quotes and `#` inside quotes.
+
+The upsmon timers and the six default notify flags are the exception to the override rule: a custom directive
+with the same key (`FINALDELAY 10`, `NOTIFYFLAG LOWBATT SYSLOG+WALL`) replaces the setting instead of
+conflicting, so files that set them by hand stay valid. On import, a timer line becomes a setting only if the
+old `nut3.cfg` already held that setting (the old backend rewrote the line from it); otherwise it stays a
+custom directive. The upssched directives are managed only while `ONBATTDELAY` or `EARLYSTAGE` is above 0, so
+an existing custom `upssched.conf` stays valid until one of them is turned on.
 
 ## Escaping
 

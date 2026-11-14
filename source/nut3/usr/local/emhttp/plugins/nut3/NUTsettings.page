@@ -34,15 +34,16 @@ $nut_mc_errors = nut_mc_validate($nut_mc);
 $nut_mc_pending = nut_mc_pending();
 $nut_mc_text = function ($key) use ($nut_mc) { return htmlspecialchars(nut_mc_custom($nut_mc, $key)); };
 $nut_mc_field = function ($key, $title, $help, $example) use ($nut_mc, $nut_mc_text) {
-    return "<dl><dt>Custom $title Directives:</dt><dd>"
-        . "<textarea class='nut-run nut-custom' data-field='$key' rows='3' spellcheck='false' style='width:100%;max-width:640px;font-family:monospace;' placeholder='" . htmlspecialchars($example, ENT_QUOTES) . "'>" . $nut_mc_text($key) . "</textarea>"
+    return "<dl><dt><label for='{$key}_TEXT'>Custom $title Directives:</label></dt><dd>"
+        . "<textarea id='{$key}_TEXT' class='nut-run nut-custom' data-field='$key' rows='3' spellcheck='false' placeholder='" . htmlspecialchars($example, ENT_QUOTES) . "'>" . $nut_mc_text($key) . "</textarea>"
         . "<input type='hidden' class='nut-run' id='$key' name='$key' value='" . htmlspecialchars($nut_mc[$key] ?? '', ENT_QUOTES) . "'>"
         . "</dd></dl><blockquote class='inline_help'><p>$help</p>"
-        . "<p>These lines are added after the directives generated from the settings above. Directives the settings already generate cannot be overridden here, such conflicts are reported when applying.</p></blockquote>";
+        . "<p>These lines are added after the directives generated from the settings above. Unless noted above, directives the settings already generate cannot be overridden here, such conflicts are reported when applying.</p></blockquote>";
 };
 
 $showStatPrefs = version_compare(parse_ini_file('/etc/unraid-version')['version'],'6.12.3', '>');
 $lastStartFailed = false;
+$nut_poll_ms = ($nut_refresh == "enable") ? max(abs(isset($display['refresh']) ? $display['refresh'] : 0), ($nut_interval * 1000)) : 0; // 0 = no auto refresh
 
 if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     if (!$nut_running) { $lastStartFailed = true; }
@@ -50,25 +51,24 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 }
 ?>
 
-<style type="text/css">
-.nut-inactive {
-  opacity: 0.3;
-}
-</style>
+<link type="text/css" rel="stylesheet" href="<?=autov('/plugins/nut3/css/nut-dw.css');?>">
+<script src="<?=autov('/plugins/nut3/js/nut-dw.js');?>"></script>
 
-<table class="tablesorter shift nut" <?if (!$nut_running):?>style="display:none"<?endif;?>>
+<div class="nut-table-wrap">
+<table class="tablesorter shift nut" aria-label="UPS status summary" <?if (!$nut_running):?>style="display:none"<?endif;?>>
 <thead><tr><th>UPS Status</th><th>Battery Charge</th><th>Runtime Left</th><th>Nominal Power</th><th>UPS Load</th><th>UPS Load</th><th>Power Factor</th></tr></thead>
-<tbody id="nut_summary"><tr><td colspan="7" style="text-align:center"><i class="fa fa-spinner fa-spin"></i> <em>Please wait, retrieving UPS information...</em></td></tr></tbody>
+<tbody id="nut_summary"><tr><td colspan="7" class="nut-center"><i class="fa fa-spinner fa-spin"></i> <em>Please wait, retrieving UPS information...</em></td></tr></tbody>
 </table>
+</div>
 
 <?if ($lastStartFailed):?>
-<div class="red-text" style="border: 1px solid red;padding: 5px;">
+<div class="red-text nut-box-error" role="alert">
     NUT was not able to start successfully - please check the <a href="/Tools/Syslog" target="_blank">SYSLOG</a> for more information.
 </div><br>
 <?endif;?>
 
 <?if ($nut_mc_pending):?>
-<div class="red-text" style="border: 1px solid red;padding: 5px;">
+<div class="red-text nut-box-error" role="status">
     <strong>Your previous NUT configuration was imported into the settings below<?=isset($nut_mc_pending['date']) ? ' on ' . htmlspecialchars($nut_mc_pending['date']) : ''?>.</strong>
     NUT keeps using the previous configuration files until you review these settings and click <strong>Apply</strong> (stop NUT first to edit them).
     The previous files are kept in <em>/boot/config/plugins/nut3/backup/legacy</em>.
@@ -79,45 +79,48 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 <?endif;?>
 
 <?if ($nut_mc_errors):?>
-<div class="red-text" style="border: 1px solid red;padding: 5px;">
+<div class="red-text nut-box-error" role="alert">
     <strong>These settings cannot be applied<?=$nut_mc_pending ? '' : ' and NUT will not start'?> until the following problems are fixed:</strong>
     <ul><?foreach ($nut_mc_errors as $nut_mc_error):?><li><?=htmlspecialchars($nut_mc_error)?></li><?endforeach;?></ul>
 </div><br>
 <?endif;?>
 
 <?if ($apc_running):?>
-<div class="red-text" style="border: 1px solid red;padding: 5px;">
+<div class="red-text nut-box-error" role="alert">
     APCUPSD also seems to be enabled, this is not recommended and will lead to both unexpected UPS behaviour and system instabilities.<br>
     Please visit the <a href="/Settings/UPSsettings" target="_blank">UPS Settings</a> and disable the APC UPS daemon before using and trusting NUT to protect your server from power failures.
 </div><br>
 <?endif;?>
 
-<div style="color:gray;margin-bottom:15px;display:none;" id="nutdevmsg">
+<div class="nut-devmsg" id="nutdevmsg">
 <fieldset>
 <legend><strong>Important Message from the Plugin Maintainer</strong></legend>
-<span style="float:right;font-size:x-small;cursor:pointer;margin-left:5px;" id="hidenutdevmsg"><u>Dismiss Until Next Message</u></span>
+<span class="nut-devmsg-dismiss" id="hidenutdevmsg" role="button" tabindex="0"><u>Dismiss Until Next Message</u></span>
 <span id="nutdevmsg0" data-md5=""></span>
 </fieldset>
 </div>
 
-<form markdown="0" id="nut-settings" name="nut_settings" method="POST" action="/update.php" target="progressFrame">
+<form markdown="0" novalidate id="nut-settings" name="nut_settings" method="POST" action="/update.php" target="progressFrame">
     <input type="hidden" name="#file" value="<?=$sName?>/<?=$sName?>.cfg">
     <input type="hidden" id="command" name="#command" value="/usr/local/emhttp/plugins/nut3/scripts/write_config" />
     <input type="hidden" name="#include" value="plugins/nut3/include/nut_validate.php" />
 
-    <span style="float:right;margin-right:10px">
+    <span class="nut-helplinks">
     <a href="https://github.com/andrebrait/NUT-unRAID/issues" target="_blank" title="NUT Issue Tracker"><i class="fa fa-medkit"></i> <u>Issue Tracker</u></a>
      / <a href="http://www.networkupstools.org/docs/user-manual.chunked/" target="_blank" title="NUT User Manual"><i class="fa fa-file-text-o"></i> <u>User Manual</u></a>
      / <a href="https://networkupstools.org/stable-hcl.html" target="_blank" title="NUT Driver Guide"><i class="fa fa-usb"></i> <u>Driver Guide</u></a>
     <?if(file_exists("/var/log/nut.log") && ($nut_syslog_method == 'file' || $nut_syslog_method == 'both')):?>
-     / <a onclick="openTerminal('log','nut','nut.log')" style="cursor:pointer;" title="NUT Service Logs"><i class="fa fa-book"></i> <u>Service Logs</u></a>
+     / <a onclick="openTerminal('log','nut','nut.log')" class="nut-pointer" title="NUT Service Logs" role="button" tabindex="0"><i class="fa fa-book"></i> <u>Service Logs</u></a>
     <?endif;?>
     </span><br>
 
+    <details class="nut-sec" id="SEC_GENERAL" open>
+        <summary>General &amp; Mode</summary>
+        <div class="nut-sec-body">
     <dl>
         <dt>Network UPS Tools Backend:</dt>
         <dd>
-            <strong><?= isset($nut_installed_backend) && $nut_installed_backend ? $nut_installed_backend : "n/a" ?></strong>
+            <strong><?= htmlspecialchars(implode(", ", array_map("basename", glob("/var/log/packages/nut-[0-9]*") ?: [])) ?: "n/a") ?></strong>
         </dd>
     </dl>
 
@@ -126,7 +129,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     </blockquote>
 
     <dl>
-        <dt>Network UPS Tools Backend Switch:</dt>
+        <dt><label for="BACKEND">Network UPS Tools Backend Switch:</label></dt>
         <dd>
             <select class="nut-run" id="BACKEND" name="BACKEND" size="1">
                 <?
@@ -166,7 +169,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     </blockquote>
 
     <dl>
-        <dt><strong>Start Network UPS Tools Service:</strong></dt>
+        <dt><label for="SERVICE"><strong>Start Network UPS Tools Service:</strong></label></dt>
         <dd>
             <select id="SERVICE" name="SERVICE" size="1">
                 <?=mk_option($nut_service, "disable", "No");?>
@@ -180,120 +183,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
         <p>The setting <strong><em>Yes</em></strong> will also enable NUT services to start automatically on UNRAID boot.</p>
     </blockquote>
 
-    <dl>
-        <dt>Enable USB Power Management Override:</dt>
-        <dd>
-            <select class="nut-run" id="ORUSBPOWER" name="ORUSBPOWER" size="1">
-                <?=mk_option($nut_usb_override, "disable", "No");?>
-                <?=mk_option($nut_usb_override, "enable", "Yes");?>
-            </select>
-            <span>
-                <i class="fa fa-exclamation-triangle tooltip-nutsett" title="System-Wide Setting" style="cursor:help;"></i>
-                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> System-Wide Setting<?endif;?>
-            </span>
-        </dd>
-    </dl>
-
-    <blockquote class="inline_help">
-        <p>Some UPS devices or drivers have USB implementations that cannot handle USB power management (auto hibernation) without resulting in connection problems.</p>
-        <p>This <strong>in most cases not recommended setting</strong> disables USB power management <strong>for all USB hubs and devices (system-wide)</strong>, setting them to <strong><em>always on</em></strong> mode.</p>
-        <p>Enabling this setting will prevent any connected USB hubs and devices from going into auto hibernation (which could alleviate UPS connection instabilities).</p>
-        <p>Please be aware after disabling this setting again a full system reboot will be required to return your system to its default USB power management behavior.</p>
-    </blockquote>
-
-    <dl>
-        <dt>Enable Rule-Based Syslog Filters:</dt>
-        <dd>
-            <select class="nut-run" id="SYSLOGFILTER" name="SYSLOGFILTER" size="1">
-                <?=mk_option($nut_syslog_filter, "disable", "No");?>
-                <?=mk_option($nut_syslog_filter, "enable", "Yes");?>
-            </select>
-            <span>
-                <i class="fa fa-exclamation-triangle tooltip-nutsett" title="System-Wide Setting" style="cursor:help;"></i>
-                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> System-Wide Setting<?endif;?>
-            </span>
-            <?if(file_exists("/var/log/nut-spam")):?>
-            <a onclick="openTerminal('log','nut-spam','nut-spam')" style="color:inherit;margin-left:5px;cursor:pointer;">
-                <i class="fa fa-book tooltip-nutsett <?=($nut_syslog_filter == 'enable') ? '' : 'nut-inactive';?>" title="NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?>"></i>
-                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?><?endif;?>
-            </a>
-            <a href="/plugins/nut3/include/nut_spamlog_helper.php?dl=true" style="color:inherit;margin-left:5px;cursor:pointer;">
-                <i class="fa fa-download tooltip-nutsett <?=($nut_syslog_filter == 'enable') ? '' : 'nut-inactive';?>" title="Download NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?>"></i>
-                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> Download NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?><?endif;?>
-            </a>
-            <span id="nut_rotate_spam" style="margin-left:5px;cursor:pointer;">
-                <i class="fa fa-trash tooltip-nutsett <?=($nut_syslog_filter == 'enable') ? '' : 'nut-inactive';?>" title="Delete NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?>"></i>
-                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> Delete NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?><?endif;?>
-            </span>
-            <?endif;?>
-        </dd>
-    </dl>
-
-    <blockquote class="inline_help">
-        <p>NUT - by design - is a rather talkative software package, this is generally extremely valuable for diagnosing any encountered operational problems.</p>
-        <p>However, often repeating UPS events such as connection drops or data staleness can fill up the SYSLOG and make diagnosing other unrelated problems more difficult.</p>
-        <p>This <strong>in most cases not recommended setting</strong> filters out common repetitive messages from the SYSLOG and redirects them to size-controlled <strong><em><a href="/plugins/nut3/include/nut_spamlog_helper.php" target="_blank">/var/log/nut-spam</a></em></strong> instead.</p>
-        <p>Advanced users can extend the predefined rules for commonly encountered repetitive messages by editing <strong><em>/boot/config/plugins/nut3/ups/xnut-nospam.conf</em></strong> on the flash drive (applied when NUT is started or its settings are applied).</p>
-        <p>Please be aware that previous messages (which have already been logged to the SYSLOG) will not be removed, rather only future encountered messages are affected by this setting.</p>
-    </blockquote>
-
-   <dl>
-        <dt>Redirection for NUT Service Logs:</dt>
-        <dd>
-            <select class="nut-run" id="SYSLOGMETHOD" name="SYSLOGMETHOD" size="1">
-                <?=mk_option($nut_syslog_method, "syslog", "Default (to Syslog)");?>
-                <?=mk_option($nut_syslog_method, "file", "File (not to Syslog)");?>
-                <?=mk_option($nut_syslog_method, "both", "File (and to Syslog)");?>
-            </select>
-            <span>
-                <i class="fa fa-exclamation-triangle tooltip-nutsett" title="System-Wide Setting" style="cursor:help;"></i>
-                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> System-Wide Setting<?endif;?>
-            </span>
-            <?if(file_exists("/var/log/nut.log")):?>
-            <a onclick="openTerminal('log','nut','nut.log')" style="color:inherit;margin-left:5px;cursor:pointer;">
-                <i class="fa fa-book tooltip-nutsett <?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : 'nut-inactive';?>" title="NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?>"></i>
-                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?><?endif;?>
-            </a>
-            <a href="/plugins/nut3/include/nut_nutlog_helper.php?dl=true" style="color:inherit;margin-left:5px;cursor:pointer;">
-                <i class="fa fa-download tooltip-nutsett <?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : 'nut-inactive';?>" title="Download NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?>"></i>
-                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> Download NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?><?endif;?>
-            </a>
-            <span id="nut_rotate_log" style="margin-left:5px;cursor:pointer;">
-                <i class="fa fa-trash tooltip-nutsett <?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : 'nut-inactive';?>" title="Delete NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?>"></i>
-                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> Delete NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?><?endif;?>
-            </span>
-            <?endif;?>
-        </dd>
-    </dl>
-
-    <blockquote class="inline_help">
-        <p>NUT - by design - is a rather talkative software package, this is generally extremely valuable for diagnosing any encountered operational problems.</p>
-        <p>However, often repeating UPS events such as connection drops or data staleness can fill up the SYSLOG and make diagnosing other unrelated problems more difficult.</p>
-        <p>This setting lets you choose to redirect NUT service logs to a separate size-controlled file <strong><em><a href="/plugins/nut3/include/nut_nutlog_helper.php" target="_blank">/var/log/nut.log</a></em></strong> instead (or to both locations).</p>
-        <p>For filtering out specific unwanted information, see above for the <strong><em>Rule-Based Syslog Filters</em></strong> (which are processed first, if both settings are active).</p>
-        <p>Please be aware that previous messages (which have already been logged to the SYSLOG) will not be removed, rather only future encountered messages are affected by this setting.</p>
-        <p>Also note that specific very important NUT-related information (such as startup, notification or shutdown events) may still also be recorded to the SYSLOG for better overall visibility.</p>
-    </blockquote>
-
-    <dl>
-        <dt>Persist Redirected Logs on Reboot:</dt>
-        <dd>
-            <select class="nut-run" id="SYSLOGBACKUP" name="SYSLOGBACKUP" size="1">
-                <?=mk_option($nut_syslog_backup, "disable", "No");?>
-                <?=mk_option($nut_syslog_backup, "enable", "Yes");?>
-            </select>
-        </dd>
-    </dl>
-
-    <blockquote class="inline_help">
-        <p>This setting controls if the last 200 KB worth of redirected logs should persist over graceful system reboots.</p>
-        <p>It only has an effect on logfiles produced by <strong><em>Rule-Based Syslog Filters</em></strong> or <strong><em>Redirection for NUT Service Logs</em></strong>.</p>
-        <p>The settings regarding the system log (SYSLOG) itself are handled inside the OS-specific settings: <a href="/Settings/SyslogSettings" target="_blank"><strong><em>Syslog Server</em></strong></a></p>
-    </blockquote>
-
     <div id="MODEIPSETT">
         <dl>
-            <dt>NUT Mode:</dt>
+            <dt><label for="MODE">NUT Mode:</label></dt>
             <dd>
                 <select class="nut-run" id="MODE" name="MODE" size="1">
                     <?=mk_option($nut_mode, 'standalone', 'Standalone');?>
@@ -329,22 +221,55 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
         <?endif;?>
 
         <dl>
-            <dt>NUT Master IP Address[:Port]:</dt>
+            <dt><label for="IPADDR">NUT Master Hostname or IP Address[:Port]:</label></dt>
             <dd>
-                <input id="IPADDR" type="text" class="narrow nut-run nut-ipaddr" name="IPADDR" value="<?=$nut_ip?>">
+                <input id="IPADDR" type="text" class="narrow nut-run nut-ipaddr" name="IPADDR" value="<?=$nut_ip?>" required maxlength="255" pattern="([A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?" data-err="Enter a hostname, IPv4 address or [IPv6 address], optionally followed by :port.">
             </dd>
         </dl>
 
         <blockquote class="inline_help">
-            <p>The IP address of the NUT master server (the UPS is connected to) to monitor.</p>
+            <p>The hostname or IP address of the NUT master server (the UPS is connected to) to monitor, optionally followed by <strong><em>:port</em></strong>. Put IPv6 addresses in square brackets, e.g. <em>[fe80::1]:3493</em>.</p>
             <p>In <strong><em>Standalone</em></strong> and <strong><em>Netserver</em></strong> modes, this setting should be <strong><em>127.0.0.1</em></strong></p>
         </blockquote>
+        <div id="TESTCONN" style="display:none">
+            <dl>
+                <dt>Connection Test:</dt>
+                <dd>
+                    <input type="button" id="btnTestConn" value="Test connection">
+                    <span id="nut_testconn_result" role="status" aria-live="polite"></span>
+                </dd>
+            </dl>
+
+            <blockquote class="inline_help">
+                <p>Checks whether the NUT master server entered above can be reached, whether it knows a UPS with the configured name, and shows that UPS's current status. The values currently in the form are used (no need to apply first).</p>
+                <p><u>Note:</u> The monitor username and password are <strong>not</strong> checked, the test does not log in.</p>
+            </blockquote>
+        </div>
     </div>
-    <div id="SETTINGS1">
+
+    <div id="NAMESETT">
         <dl>
-            <dt>NUT Monitor Username:</dt>
+            <dt><label for="NAME">UPS Name:</label></dt>
             <dd>
-                <input id="MONUSER" type="text" class="narrow nut-run nut-alphanumeric" name="MONUSER" value="<?=$nut_monuser?>">
+                <input id="NAME" type="text" class="narrow nut-run nut-name" name="NAME" value="<?=$nut_name?>" required maxlength="64">
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>The name of the UPS configured in NUT (on the master server).</p>
+            <p>It is recommended to leave this setting as it is, unless connecting to a UPS with a different name in <strong><em>Slave</em></strong> mode.</p>
+        </blockquote>
+    </div>
+        </div>
+    </details>
+    <details class="nut-sec" id="SEC_UPS" open>
+        <summary>UPS &amp; Driver</summary>
+        <div class="nut-sec-body">
+        <div id="SETTINGS1">
+        <dl>
+            <dt><label for="MONUSER">NUT Monitor Username:</label></dt>
+            <dd>
+                <input id="MONUSER" type="text" class="narrow nut-run nut-alphanumeric" name="MONUSER" value="<?=$nut_monuser?>" required maxlength="64">
             </dd>
         </dl>
 
@@ -354,10 +279,10 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
         </blockquote>
 
         <dl>
-            <dt>NUT Monitor Password:</dt>
+            <dt><label for="MONPASS">NUT Monitor Password:</label></dt>
             <dd>
-                <input id="MONPASS" type="password" class="narrow nut-run" name="MONPASS" value="<?=$nut_monpass?>">
-                <i id="monpass-htext" class="fa fa-hand-paper-o tooltip-nutsett" title="Spaces and the characters # &quot; \ = are not allowed!" style="display:none;color:red;cursor:help;"></i>
+                <input id="MONPASS" type="password" class="narrow nut-run" name="MONPASS" value="<?=$nut_monpass?>" required data-err="A password is required.">
+                <span id="monpass-htext" class="nut-pass-warn" role="status"><i class="fa fa-hand-paper-o" aria-hidden="true"></i> Spaces and the characters # " \ = are not allowed</span>
             </dd>
         </dl>
 
@@ -366,33 +291,11 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             <p>Use printable characters without spaces or <strong># " \ =</strong> - NUT sends passwords unquoted over the network.</p>
         </blockquote>
 
-        <dl>
-            <dt>NUT Monitor Debug Level:</dt>
-            <dd>
-                <select class="nut-run" id="DEBLEVELMON" name="DEBLEVELMON" size="1">
-                <?=mk_option($nut_deblevel_mon, 'default', 'Default');?>
-                <?=mk_option($nut_deblevel_mon, '1', 'Level 1');?>
-                <?=mk_option($nut_deblevel_mon, '2', 'Level 2');?>
-                <?=mk_option($nut_deblevel_mon, '3', 'Level 3');?>
-                <?=mk_option($nut_deblevel_mon, '4', 'Level 4');?>
-                <?=mk_option($nut_deblevel_mon, '5', 'Level 5');?>
-                <?=mk_option($nut_deblevel_mon, '6', 'Level 6');?>
-                </select>
-            </dd>
-        </dl>
-
-        <blockquote class="inline_help">
-            <p>The NUT Monitor Debug Level decides how much information the NUT Monitor outputs to the SYSLOG.</p>
-            <p>In case of problems with your UPS, the developers might ask you to raise this level for diagnostic reasons.</p>
-            <p>If you want your SYSLOG to survive system reboots (for diagnostics), you can set this elsewhere - see <a href="/Settings/SyslogSettings" target="_blank">Settings->Syslog Server->Mirror syslog to flash</a>.</p>
-            <p>You will then find a mirror of the SYSLOG file on your USB drive (<a href="/plugins/nut3/include/nut_syslog_helper.php" target="_blank">HERE</a> or inside <strong><em>/boot/logs/</em></strong>), please be aware that mirroring will increase wear to your USB drive.</p>
-        </blockquote>
-
         <div id="SLAVE">
             <dl>
-                <dt>NUT Slave Username:</dt>
+                <dt><label for="SLAVEUSER">NUT Slave Username:</label></dt>
                 <dd>
-                    <input id="SLAVEUSER" type="text" class="narrow nut-run nut-alphanumeric" name="SLAVEUSER" value="<?=$nut_slaveuser?>">
+                    <input id="SLAVEUSER" type="text" class="narrow nut-run nut-alphanumeric" name="SLAVEUSER" value="<?=$nut_slaveuser?>" required maxlength="64">
                 </dd>
             </dl>
 
@@ -403,10 +306,10 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             </blockquote>
 
             <dl>
-                <dt>NUT Slave Password:</dt>
+                <dt><label for="SLAVEPASS">NUT Slave Password:</label></dt>
                 <dd>
-                    <input id="SLAVEPASS" type="password" class="narrow nut-run" name="SLAVEPASS" value="<?=$nut_slavepass?>">
-                    <i id="slavepass-htext" class="fa fa-hand-paper-o tooltip-nutsett" title="Spaces and the characters # &quot; \ = are not allowed!" style="display:none;color:red;cursor:help;"></i>
+                    <input id="SLAVEPASS" type="password" class="narrow nut-run" name="SLAVEPASS" value="<?=$nut_slavepass?>" required data-err="A password is required.">
+                    <span id="slavepass-htext" class="nut-pass-warn" role="status"><i class="fa fa-hand-paper-o" aria-hidden="true"></i> Spaces and the characters # " \ = are not allowed</span>
                 </dd>
             </dl>
 
@@ -416,7 +319,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             </blockquote>
 
             <dl>
-                <dt>NUT Listen Addresses:</dt>
+                <dt><label for="LISTEN">NUT Listen Addresses:</label></dt>
                 <dd>
                     <input id="LISTEN" type="text" class="narrow nut-run" name="LISTEN" value="<?=$nut_listen?>">
                 </dd>
@@ -430,49 +333,35 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
         </div>
 
         <dl>
-            <dt>NUT Admin Username:</dt>
+            <dt><label for="ADMINUSER">NUT Admin Username:</label></dt>
             <dd>
-                <input id="ADMINUSER" type="text" class="narrow nut-run nut-alphanumeric" name="ADMINUSER" value="<?=$nut_adminuser?>" placeholder="none">
+                <input id="ADMINUSER" type="text" class="narrow nut-run nut-alphanumeric" name="ADMINUSER" value="<?=$nut_adminuser?>" placeholder="none" maxlength="64">
             </dd>
         </dl>
 
         <blockquote class="inline_help">
-            <p>Optional administrative user for the <strong><em>NUT Commands</em></strong> page, leave empty (with an empty password) to have no such user.</p>
+            <p>Optional administrative user for the <strong><em>NUT Commands</em></strong> page and the scheduled <strong><em>Battery Self-Test</em></strong>, leave empty (with an empty password) to have no such user.</p>
             <p>In <strong><em>Standalone</em></strong> and <strong><em>Netserver</em></strong> modes this user is created with permission to set variables, force shutdowns and run all UPS commands.</p>
             <p>In <strong><em>Slave</em></strong> mode, enter an administrative user that exists on the NUT master server instead.</p>
         </blockquote>
 
         <dl>
-            <dt>NUT Admin Password:</dt>
+            <dt><label for="ADMINPASS">NUT Admin Password:</label></dt>
             <dd>
                 <input id="ADMINPASS" type="password" class="narrow nut-run" name="ADMINPASS" value="<?=$nut_adminpass?>">
-                <i id="adminpass-htext" class="fa fa-hand-paper-o tooltip-nutsett" title="Spaces and the characters # &quot; \ = are not allowed!" style="display:none;color:red;cursor:help;"></i>
+                <span id="adminpass-htext" class="nut-pass-warn" role="status"><i class="fa fa-hand-paper-o" aria-hidden="true"></i> Spaces and the characters # " \ = are not allowed</span>
             </dd>
         </dl>
 
         <blockquote class="inline_help">
             <p>The password of the NUT Admin user. Use printable characters without spaces or <strong># " \ =</strong>.</p>
         </blockquote>
-    </div>
+        </div>
 
-    <div id="NAMESETT">
-        <dl>
-            <dt>UPS Name:</dt>
-            <dd>
-                <input id="NAME" type="text" class="narrow nut-run nut-name" name="NAME" value="<?=$nut_name?>">
-            </dd>
-        </dl>
-
-        <blockquote class="inline_help">
-            <p>The name of the UPS configured in NUT (on the master server).</p>
-            <p>It is recommended to leave this setting as it is, unless connecting to a UPS with a different name in <strong><em>Slave</em></strong> mode.</p>
-        </blockquote>
-    </div>
-
-    <div id="SETTINGS2">
+        <div id="SETTINGS2">
         <div id="DRIVERS">
             <dl>
-                <dt>UPS Driver:</dt>
+                <dt><label for="DRIVER">UPS Driver:</label></dt>
                 <dd>
                     <select class="nut-run" id="DRIVER" name="DRIVER" size="1">
                     <?=mk_option($nut_driver, 'usbhid-ups', 'usbhid-ups');?>
@@ -487,8 +376,8 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                     <?=mk_option($nut_driver, 'snmp-ups', 'snmp-ups');?>
                     <?=mk_option($nut_driver, 'custom', 'custom (not listed)');?>
                     </select>
-                    <input type="hidden" class="narrow serial nut-run" id="SERIAL" name="SERIAL" placeholder="driver name" value="<?=$nut_serial;?>">
-                    <span id="SCANDRIVERS" style="cursor:pointer;">
+                    <input type="hidden" class="narrow serial nut-run" id="SERIAL" name="SERIAL" placeholder="driver name" aria-label="Custom UPS driver name" value="<?=$nut_serial;?>" required maxlength="64" pattern="[A-Za-z0-9_\-]+" data-err="Enter the driver name (letters, digits, underscore, dash).">
+                    <span id="SCANDRIVERS" class="nut-pointer" role="button" tabindex="0" aria-label="Scan for Devices">
                         <i class="fa fa-search tooltip-nutsett" title="Scan for Devices"></i>
                         <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> Scan for Devices<?endif;?>
                     </span>
@@ -503,8 +392,8 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             </blockquote>
 
             <dl>
-              <dt>UPS Driver Port:</dt>
-              <dd><input type="text" name="PORT" class="narrow nut-run" value="<?=$nut_port;?>"></dd>
+              <dt><label for="PORT">UPS Driver Port:</label></dt>
+              <dd><input id="PORT" type="text" name="PORT" class="narrow nut-run" value="<?=$nut_port;?>" required maxlength="255" data-err="A port is required, e.g. auto."></dd>
             </dl>
 
             <blockquote class="inline_help">
@@ -515,7 +404,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             </blockquote>
 
             <dl>
-              <dt>UPS Driver Debug Level:</dt>
+              <dt><label for="DEBLEVEL">UPS Driver Debug Level:</label></dt>
               <dd>
                     <select class="nut-run" id="DEBLEVEL" name="DEBLEVEL" size="1">
                     <?=mk_option($nut_deblevel, 'default', 'Default');?>
@@ -538,7 +427,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 
             <div id="snmp" style="display: none;">
                 <dl>
-                    <dt>SNMP Version:</dt>
+                    <dt><label for="SNMPVER">SNMP Version:</label></dt>
                     <dd>
                         <select class="nut-run" id="SNMPVER" name="SNMPVER" size="1">
                             <?=mk_option($nut_snmpver, 'v1', 'v1');?>
@@ -554,9 +443,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                 </blockquote>
 
                 <dl>
-                    <dt>SNMP Community:</dt>
+                    <dt><label for="COMMUNITY">SNMP Community:</label></dt>
                     <dd>
-                        <input type="text" name="COMMUNITY" class="narrow nut-run" value="<?=$nut_community;?>">
+                        <input id="COMMUNITY" type="text" name="COMMUNITY" class="narrow nut-run" value="<?=$nut_community;?>" required maxlength="64" data-err="An SNMP community is required.">
                     </dd>
                 </dl>
 
@@ -565,7 +454,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                 </blockquote>
 
                 <dl>
-                    <dt>SNMP Definition MIB:</dt>
+                    <dt><label for="SNMPMIB">SNMP Definition MIB:</label></dt>
                     <dd>
                         <select class="nut-run" id="SNMPMIB" name="SNMPMIB" size="1">
                             <?=mk_option($nut_snmpmib, 'auto', 'auto');?>
@@ -610,9 +499,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                 </blockquote>
 
                 <dl>
-                    <dt>SNMP Polling Frequency:</dt>
+                    <dt><label for="POLL">SNMP Polling Frequency:</label></dt>
                     <dd>
-                        <input type="text" name="POLL" class="narrow nut-run nut-numeric" value="<?=$nut_poll;?>">
+                        <input id="POLL" type="number" name="POLL" class="narrow nut-run" value="<?=$nut_poll;?>" min="1" max="99999" step="1" required data-err="Enter a whole number from 1 to 99999.">
                     </dd>
                 </dl>
 
@@ -622,11 +511,16 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             </div>
 
             <?=$nut_mc_field('CUSTOM_UPSGLOBAL', 'ups.conf (global)', 'Global <strong><em>ups.conf</em></strong> directives, placed before the UPS section (e.g. <em>maxretry</em> or <em>pollinterval</em>).', 'maxretry = 3')?>
-            <?=$nut_mc_field('CUSTOM_UPS', 'ups.conf (UPS section)', 'Extra UPS driver options for the UPS section of <strong><em>ups.conf</em></strong> (e.g. <em>vendorid</em>, <em>serial</em> or SNMPv3 credentials), as found by <strong><em>Auto Config</em></strong> or the device scanner.', 'vendorid = 051d')?>
+            <?=$nut_mc_field('CUSTOM_UPS', 'ups.conf (UPS section)', 'Extra driver options for the configured UPS (e.g. <em>vendorid</em>, <em>serial</em> or SNMPv3 credentials). Add other local UPSes with a <em>[name]</em> section containing <em>driver</em> and <em>port</em>. They are monitored with power value 0 and do not affect shutdown by default. A custom <em>MONITOR name@127.0.0.1</em> line in <strong><em>Custom upsmon.conf Directives</em></strong> replaces that UPS’s generated monitor and can change its shutdown behavior.', 'vendorid = 051d')?>
         </div>
-
+        </div>
+        </div>
+    </details>
+    <details class="nut-sec" id="SEC_SHUTDOWN" open>
+        <summary>Shutdown</summary>
+        <div class="nut-sec-body">
         <dl>
-            <dt>UPS Battery Runtime Attribute:</dt>
+            <dt><label for="RUNTIME">UPS Battery Runtime Attribute:</label></dt>
             <dd>
                 <select class="nut-run" id="RUNTIME" name="RUNTIME" size="1">
                     <?=mk_option($nut_runtime, 'battery.runtime', 'battery.runtime');?>
@@ -643,7 +537,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
         </blockquote>
 
         <dl>
-            <dt>Shutdown Mode:</dt>
+            <dt><label for="SHUTDOWN">Shutdown Mode:</label></dt>
             <dd>
                 <select class="nut-run" id="SHUTDOWN" name="SHUTDOWN" size="1">
                     <?=mk_option($nut_shutdown, 'batt_level', 'Battery Level');?>
@@ -666,7 +560,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 
         <div id="SHUTDOWN0">
             <dl>
-                <dt>Battery Level to initiate Shutdown (%):</dt>
+                <dt><label for="BATTERYLEVEL">Battery Level to initiate Shutdown (%):</label></dt>
                 <dd>
                     <select class="nut-run" id="BATTERYLEVEL" name="BATTERYLEVEL" size="1">
                         <? echo nut_get_battery_options($nut_battery);?>
@@ -681,9 +575,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 
         <div id="SHUTDOWN1">
             <dl>
-                <dt>Battery Runtime Left to initiate Shutdown:</dt>
+                <dt><label for="RTVALUE">Battery Runtime Left to initiate Shutdown:</label></dt>
                 <dd>
-                    <input id="RTVALUE" type="text" class="narrow nut-run nut-numeric" name="RTVALUE" value="<?=$nut_rtvalue?>">
+                    <input id="RTVALUE" type="number" class="narrow nut-run" name="RTVALUE" value="<?=$nut_rtvalue?>" min="1" max="86400" step="1" required data-err="Enter a whole number from 1 to 86400.">
                 </dd>
             </dl>
 
@@ -696,7 +590,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 
         <div id="SHUTDOWN2">
             <dl>
-                <dt>Time on Battery before Shutdown (Minutes):</dt>
+                <dt><label for="TIMEOUT">Time on Battery before Shutdown (Minutes):</label></dt>
                 <dd>
                     <select class="nut-run" id="TIMEOUT" name="TIMEOUT" size="1">
                         <? echo nut_get_minute_options($nut_timeout);?>
@@ -715,9 +609,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 
         <div id="UPSKILL">
             <dl>
-                <dt>Disable UPS Power after Shutdown:</dt>
+                <dt><label for="UPSKILL_field">Disable UPS Power after Shutdown:</label></dt>
                 <dd>
-                    <select class="nut-run" name="UPSKILL" size="1">
+                    <select id="UPSKILL_field" class="nut-run" name="UPSKILL" size="1">
                         <?=mk_option($nut_upskill, 'disable', 'No');?>
                         <?=mk_option($nut_upskill, 'enable', 'Yes');?>
                     </select>
@@ -730,9 +624,13 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                 <p><u>Warning:</u> Not all UPS devices support this setting, in the worst case it will have no effect.</p>
             </blockquote>
         </div>
-
+        </div>
+    </details>
+    <details class="nut-sec" id="SEC_NOTIFY" open>
+        <summary>Notifications</summary>
+        <div class="nut-sec-body">
         <dl>
-            <dt>Battery Replacement Notification:</dt>
+            <dt><label for="REPLBATTMSG">Battery Replacement Notification:</label></dt>
             <dd>
                 <select class="nut-run" id="REPLBATTMSG" name="REPLBATTMSG" size="1">
                     <?=mk_option($nut_replbattmsg, 'disable', 'No');?>
@@ -746,21 +644,307 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             <p>By default this notification will be sent every 12 hours until the batteries are replaced.</p>
         </blockquote>
 
+        <dl>
+            <dt><label for="ONBATTDELAY">Only Alert for On Battery After:</label></dt>
+            <dd>
+                <input id="ONBATTDELAY" type="number" class="narrow nut-run" name="ONBATTDELAY" value="<?=$nut_onbattdelay?>" min="0" max="86400" step="1" required data-err="Enter a whole number from 0 to 86400.">
+                <em>seconds (0 = alert immediately)</em>
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>Short power blips would otherwise notify you every time. With a value above 0 the on-battery alert (system message and notification) is only sent if the UPS is still on battery after this many seconds, and the "on line" alert only follows an alert that was actually sent.</p>
+            <p>Shutdown handling and the <strong><em>ONBATT</em></strong> / <strong><em>ONLINE</em></strong> hooks are not delayed.</p>
+            <p>While this is above 0 (or the EARLY_STAGE delay below), the plugin manages the <strong><em>CMDSCRIPT</em></strong>, <strong><em>PIPEFN</em></strong> and <strong><em>LOCKFN</em></strong> directives of <strong><em>upssched.conf</em></strong>, a custom <strong><em>upssched.conf</em></strong> directive for any of them is then reported as a conflict when applying.</p>
+        </blockquote>
+
+        <dl>
+            <dt><label for="EARLYSTAGE">Run the EARLY_STAGE Hook After:</label></dt>
+            <dd>
+                <input id="EARLYSTAGE" type="number" class="narrow nut-run" name="EARLYSTAGE" value="<?=$nut_earlystage?>" min="0" max="86400" step="1" required data-err="Enter a whole number from 0 to 86400.">
+                <em>seconds on battery (0 = off)</em>
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>Runs your <strong><em>EARLY_STAGE</em></strong> function from <strong><em>/boot/config/plugins/nut3/ups/xnut-notify-hooks.sh</em></strong> once a UPS has been on battery this long, e.g. to stop VMs or reduce the GPU load before the shutdown criteria are met. It is cancelled if power returns first, and runs for every monitored UPS (the UPS is in the <strong><em>UPSNAME</em></strong> variable).</p>
+            <p>Hooks you can define in that file: <strong><em>ONBATT</em></strong>, <strong><em>ONLINE</em></strong>, <strong><em>ONBATT_SHUTDOWN</em></strong>, <strong><em>REPLBATT</em></strong>, <strong><em>EARLY_STAGE</em></strong>, and one named after any other upsmon event you enable.</p>
+            <p>While this is above 0 (or the on-battery alert delay above), the plugin manages the <strong><em>CMDSCRIPT</em></strong>, <strong><em>PIPEFN</em></strong> and <strong><em>LOCKFN</em></strong> directives of <strong><em>upssched.conf</em></strong>, a custom <strong><em>CMDSCRIPT</em></strong> is then reported as a conflict when applying.</p>
+        </blockquote>
+        </div>
+    </details>
+    <details class="nut-sec" id="SEC_BATTTEST">
+        <summary>Battery Self-Test</summary>
+        <div class="nut-sec-body">
+        <dl>
+            <dt><label for="BATTTEST">Scheduled Battery Self-Test:</label></dt>
+            <dd>
+                <select class="nut-run" id="BATTTEST" name="BATTTEST" size="1">
+                    <?=mk_option($nut_batttest, 'disable', 'Off');?>
+                    <?=mk_option($nut_batttest, 'weekly', 'Weekly');?>
+                    <?=mk_option($nut_batttest, 'monthly', 'Monthly');?>
+                </select>
+                <em>requires the <strong>NUT Admin Username</strong> and <strong>Password</strong> (UPS &amp; Driver)</em>
+            </dd>
+        </dl>
+        <div id="BATTTEST-SETTINGS">
+        <dl>
+            <dt><label for="BATTTESTWDAY">Day and Hour:</label></dt>
+            <dd>
+                <select class="nut-run" id="BATTTESTWDAY" name="BATTTESTWDAY" size="1">
+                    <? foreach(['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'] as $i => $d) echo mk_option($nut_batttest_wday, (string)$i, $d); ?>
+                </select>
+                <select class="nut-run" id="BATTTESTMDAY" name="BATTTESTMDAY" size="1" aria-label="Day of the month">
+                    <? for($i = 1; $i <= 28; $i++) echo mk_option($nut_batttest_mday, (string)$i, "Day $i"); ?>
+                </select>
+                at
+                <select class="nut-run" id="BATTTESTHOUR" name="BATTTESTHOUR" size="1" aria-label="Hour of the day">
+                    <? for($i = 0; $i < 24; $i++) echo mk_option($nut_batttest_hour, (string)$i, sprintf('%02d:00', $i)); ?>
+                </select>
+            </dd>
+            <dt><label for="BATTTESTTYPE">Test Type:</label></dt>
+            <dd>
+                <select class="nut-run" id="BATTTESTTYPE" name="BATTTESTTYPE" size="1">
+                    <?=mk_option($nut_batttest_type, 'quick', 'Quick');?>
+                    <?=mk_option($nut_batttest_type, 'deep', 'Deep');?>
+                </select>
+            </dd>
+            <dt><label for="BATTTESTUPS">UPS to Test:</label></dt>
+            <dd>
+                <?
+                // slave mode can only test the monitored UPS; a saved UPS that is not listed (anymore) stays selectable instead of silently resetting
+                $nut_bt_list = array_map('strval', $nut_mode === 'slave' ? [$nut_name] : array_keys(nut_ups_list($nut_name, $nut_ip)));
+                if ($nut_batttest_ups !== '' && !in_array($nut_batttest_ups, $nut_bt_list, true)) $nut_bt_list[] = $nut_batttest_ups;
+                ?>
+                <select class="nut-run" id="BATTTESTUPS" name="BATTTESTUPS" size="1">
+                    <?=mk_option($nut_batttest_ups, '', "GUI UPS ($nut_name)");?>
+                    <? foreach ($nut_bt_list as $nut_bt_ups): ?>
+                    <?=mk_option($nut_batttest_ups, $nut_bt_ups, $nut_bt_ups);?>
+                    <? endforeach; ?>
+                </select>
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>Starts a battery self-test (<strong><em>test.battery.start.quick</em></strong> or <strong><em>.deep</em></strong>) on schedule and sends a notification with the result (a warning if it did not pass). Monthly runs use days 1 to 28.</p>
+            <p>The test is skipped if the UPS is not on line, the battery is below 90%, or the UPS does not support the command. A deep test discharges the battery noticeably, use it sparingly.</p>
+            <p>Scheduled tests run as the <strong><em>NUT Admin</em></strong> user: while the schedule is not <strong><em>Off</em></strong>, <strong><em>NUT Admin Username</em></strong> and <strong><em>NUT Admin Password</em></strong> must be set or the settings are refused when applying. Newly configured UPSes appear in the list after applying the settings.</p>
+        </blockquote>
+        </div>
+        </div>
+    </details>
+    <details class="nut-sec" id="SEC_ADVANCED">
+        <summary>Advanced</summary>
+        <div class="nut-sec-body">
+        <dl>
+            <dt><label for="DEBLEVELMON">NUT Monitor Debug Level:</label></dt>
+            <dd>
+                <select class="nut-run" id="DEBLEVELMON" name="DEBLEVELMON" size="1">
+                <?=mk_option($nut_deblevel_mon, 'default', 'Default');?>
+                <?=mk_option($nut_deblevel_mon, '1', 'Level 1');?>
+                <?=mk_option($nut_deblevel_mon, '2', 'Level 2');?>
+                <?=mk_option($nut_deblevel_mon, '3', 'Level 3');?>
+                <?=mk_option($nut_deblevel_mon, '4', 'Level 4');?>
+                <?=mk_option($nut_deblevel_mon, '5', 'Level 5');?>
+                <?=mk_option($nut_deblevel_mon, '6', 'Level 6');?>
+                </select>
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>The NUT Monitor Debug Level decides how much information the NUT Monitor outputs to the SYSLOG.</p>
+            <p>In case of problems with your UPS, the developers might ask you to raise this level for diagnostic reasons.</p>
+            <p>If you want your SYSLOG to survive system reboots (for diagnostics), you can set this elsewhere - see <a href="/Settings/SyslogSettings" target="_blank">Settings->Syslog Server->Mirror syslog to flash</a>.</p>
+            <p>You will then find a mirror of the SYSLOG file on your USB drive (<a href="/plugins/nut3/include/nut_syslog_helper.php" target="_blank">HERE</a> or inside <strong><em>/boot/logs/</em></strong>), please be aware that mirroring will increase wear to your USB drive.</p>
+        </blockquote>
+
+        <dl>
+            <dt><label for="NOCOMMWARNTIME">NUT Monitor No-Communication Warning Interval:</label></dt>
+            <dd>
+                <input id="NOCOMMWARNTIME" type="number" class="narrow nut-run" name="NOCOMMWARNTIME" value="<?=$nut_nocommwarntime?>" min="1" max="86400" step="1" required data-err="Enter a whole number from 1 to 86400.">
+                <em>seconds (NUT default: 300)</em>
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>NUT Monitor (<strong><em>upsmon</em></strong>, setting <strong><em>NOCOMMWARNTIME</em></strong>) warns you if it has been unable to talk to the UPS for this many seconds, and repeats the warning at the same interval.</p>
+            <p>A custom <strong><em>upsmon.conf</em></strong> directive with the same key replaces this setting instead of conflicting with it.</p>
+        </blockquote>
+
+        <dl>
+            <dt><label for="FINALDELAY">NUT Monitor Final Shutdown Delay:</label></dt>
+            <dd>
+                <input id="FINALDELAY" type="number" class="narrow nut-run" name="FINALDELAY" value="<?=$nut_finaldelay?>" min="0" max="3600" step="1" required data-err="Enter a whole number from 0 to 3600.">
+                <em>seconds (NUT default: 5)</em>
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>The time upsmon waits between telling its slaves that a shutdown is coming and starting its own shutdown (setting <strong><em>FINALDELAY</em></strong>).</p>
+            <p>Only relevant when other machines monitor this UPS as slaves. <strong><em>0</em></strong> is allowed.</p>
+            <p>A custom <strong><em>upsmon.conf</em></strong> directive with the same key replaces this setting instead of conflicting with it.</p>
+        </blockquote>
+
+        <dl>
+            <dt><label for="HOSTSYNC">NUT Monitor Slave Synchronisation Timeout:</label></dt>
+            <dd>
+                <input id="HOSTSYNC" type="number" class="narrow nut-run" name="HOSTSYNC" value="<?=$nut_hostsync?>" min="1" max="3600" step="1" required data-err="Enter a whole number from 1 to 3600.">
+                <em>seconds (NUT default: 15)</em>
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>How long upsmon waits for its slaves to log out before it continues with the shutdown (setting <strong><em>HOSTSYNC</em></strong>).</p>
+            <p>A custom <strong><em>upsmon.conf</em></strong> directive with the same key replaces this setting instead of conflicting with it.</p>
+        </blockquote>
+
+        <dl>
+            <dt><label for="RBWARNTIME">NUT Monitor Replace-Battery Reminder Interval:</label></dt>
+            <dd>
+                <input id="RBWARNTIME" type="number" class="narrow nut-run" name="RBWARNTIME" value="<?=$nut_rbwarntime?>" min="1" max="31536000" step="1" required data-err="Enter a whole number from 1 to 31536000.">
+                <em>seconds (NUT default: 43200)</em>
+            </dd>
+        </dl>
+
+        <blockquote class="inline_help">
+            <p>How often upsmon repeats the "replace battery" warning while the UPS reports it (setting <strong><em>RBWARNTIME</em></strong>); 43200 seconds is 12 hours.</p>
+            <p>Only used if <strong><em>Battery Replacement Notification</em></strong> is enabled.</p>
+            <p>A custom <strong><em>upsmon.conf</em></strong> directive with the same key replaces this setting instead of conflicting with it.</p>
+        </blockquote>
+
+    <dl>
+        <dt><label for="ORUSBPOWER">Enable USB Power Management Override:</label></dt>
+        <dd>
+            <select class="nut-run" id="ORUSBPOWER" name="ORUSBPOWER" size="1">
+                <?=mk_option($nut_usb_override, "disable", "No");?>
+                <?=mk_option($nut_usb_override, "enable", "Yes");?>
+            </select>
+            <span>
+                <i class="fa fa-exclamation-triangle tooltip-nutsett nut-help-cursor" title="System-Wide Setting" role="img" aria-label="System-Wide Setting"></i>
+                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> System-Wide Setting<?endif;?>
+            </span>
+        </dd>
+    </dl>
+
+    <blockquote class="inline_help">
+        <p>Some UPS devices or drivers have USB implementations that cannot handle USB power management (auto hibernation) without resulting in connection problems.</p>
+        <p>This <strong>in most cases not recommended setting</strong> disables USB power management <strong>for all USB hubs and devices (system-wide)</strong>, setting them to <strong><em>always on</em></strong> mode.</p>
+        <p>Enabling this setting will prevent any connected USB hubs and devices from going into auto hibernation (which could alleviate UPS connection instabilities).</p>
+        <p>Please be aware after disabling this setting again a full system reboot will be required to return your system to its default USB power management behavior.</p>
+    </blockquote>
+
+    <dl>
+        <dt><label for="SYSLOGFILTER">Enable Rule-Based Syslog Filters:</label></dt>
+        <dd>
+            <select class="nut-run" id="SYSLOGFILTER" name="SYSLOGFILTER" size="1">
+                <?=mk_option($nut_syslog_filter, "disable", "No");?>
+                <?=mk_option($nut_syslog_filter, "enable", "Yes");?>
+            </select>
+            <span>
+                <i class="fa fa-exclamation-triangle tooltip-nutsett nut-help-cursor" title="System-Wide Setting" role="img" aria-label="System-Wide Setting"></i>
+                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> System-Wide Setting<?endif;?>
+            </span>
+            <?if(file_exists("/var/log/nut-spam")):?>
+            <a onclick="openTerminal('log','nut-spam','nut-spam')" style="color:inherit;margin-left:5px;cursor:pointer;" role="button" tabindex="0" aria-label="NUT Spam Logs">
+                <i class="fa fa-book tooltip-nutsett <?=($nut_syslog_filter == 'enable') ? '' : 'nut-inactive';?>" title="NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?>"></i>
+                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?><?endif;?>
+            </a>
+            <a href="/plugins/nut3/include/nut_spamlog_helper.php?dl=true" style="color:inherit;margin-left:5px;cursor:pointer;" aria-label="Download NUT Spam Logs">
+                <i class="fa fa-download tooltip-nutsett <?=($nut_syslog_filter == 'enable') ? '' : 'nut-inactive';?>" title="Download NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?>"></i>
+                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> Download NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?><?endif;?>
+            </a>
+            <span id="nut_rotate_spam" style="margin-left:5px;cursor:pointer;" role="button" tabindex="0" aria-label="Delete NUT Spam Logs">
+                <i class="fa fa-trash tooltip-nutsett <?=($nut_syslog_filter == 'enable') ? '' : 'nut-inactive';?>" title="Delete NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?>"></i>
+                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> Delete NUT Spam Logs<?=($nut_syslog_filter == 'enable') ? '' : ' (Inactive)';?><?endif;?>
+            </span>
+            <?endif;?>
+        </dd>
+    </dl>
+
+    <blockquote class="inline_help">
+        <p>NUT - by design - is a rather talkative software package, this is generally extremely valuable for diagnosing any encountered operational problems.</p>
+        <p>However, often repeating UPS events such as connection drops or data staleness can fill up the SYSLOG and make diagnosing other unrelated problems more difficult.</p>
+        <p>This <strong>in most cases not recommended setting</strong> filters out common repetitive messages from the SYSLOG and redirects them to size-controlled <strong><em><a href="/plugins/nut3/include/nut_spamlog_helper.php" target="_blank">/var/log/nut-spam</a></em></strong> instead.</p>
+        <p>Advanced users can extend the predefined rules for commonly encountered repetitive messages by editing <strong><em>/boot/config/plugins/nut3/ups/xnut-nospam.conf</em></strong> on the flash drive (applied when NUT is started or its settings are applied).</p>
+        <p>Please be aware that previous messages (which have already been logged to the SYSLOG) will not be removed, rather only future encountered messages are affected by this setting.</p>
+    </blockquote>
+
+   <dl>
+        <dt><label for="SYSLOGMETHOD">Redirection for NUT Service Logs:</label></dt>
+        <dd>
+            <select class="nut-run" id="SYSLOGMETHOD" name="SYSLOGMETHOD" size="1">
+                <?=mk_option($nut_syslog_method, "syslog", "Default (to Syslog)");?>
+                <?=mk_option($nut_syslog_method, "file", "File (not to Syslog)");?>
+                <?=mk_option($nut_syslog_method, "both", "File (and to Syslog)");?>
+            </select>
+            <span>
+                <i class="fa fa-exclamation-triangle tooltip-nutsett nut-help-cursor" title="System-Wide Setting" role="img" aria-label="System-Wide Setting"></i>
+                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> System-Wide Setting<?endif;?>
+            </span>
+            <?if(file_exists("/var/log/nut.log")):?>
+            <a onclick="openTerminal('log','nut','nut.log')" style="color:inherit;margin-left:5px;cursor:pointer;" role="button" tabindex="0" aria-label="NUT Service Logs">
+                <i class="fa fa-book tooltip-nutsett <?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : 'nut-inactive';?>" title="NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?>"></i>
+                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?><?endif;?>
+            </a>
+            <a href="/plugins/nut3/include/nut_nutlog_helper.php?dl=true" style="color:inherit;margin-left:5px;cursor:pointer;" aria-label="Download NUT Service Logs">
+                <i class="fa fa-download tooltip-nutsett <?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : 'nut-inactive';?>" title="Download NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?>"></i>
+                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> Download NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?><?endif;?>
+            </a>
+            <span id="nut_rotate_log" style="margin-left:5px;cursor:pointer;" role="button" tabindex="0" aria-label="Delete NUT Service Logs">
+                <i class="fa fa-trash tooltip-nutsett <?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : 'nut-inactive';?>" title="Delete NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?>"></i>
+                <?if(version_compare(parse_ini_file('/etc/unraid-version')['version'],'7.1.99', '>')):?> Delete NUT Service Logs<?=($nut_syslog_method == 'file' || $nut_syslog_method == 'both') ? '' : ' (Inactive)';?><?endif;?>
+            </span>
+            <?endif;?>
+        </dd>
+    </dl>
+
+    <blockquote class="inline_help">
+        <p>NUT - by design - is a rather talkative software package, this is generally extremely valuable for diagnosing any encountered operational problems.</p>
+        <p>However, often repeating UPS events such as connection drops or data staleness can fill up the SYSLOG and make diagnosing other unrelated problems more difficult.</p>
+        <p>This setting lets you choose to redirect NUT service logs to a separate size-controlled file <strong><em><a href="/plugins/nut3/include/nut_nutlog_helper.php" target="_blank">/var/log/nut.log</a></em></strong> instead (or to both locations).</p>
+        <p>For filtering out specific unwanted information, see above for the <strong><em>Rule-Based Syslog Filters</em></strong> (which are processed first, if both settings are active).</p>
+        <p>Please be aware that previous messages (which have already been logged to the SYSLOG) will not be removed, rather only future encountered messages are affected by this setting.</p>
+        <p>Also note that specific very important NUT-related information (such as startup, notification or shutdown events) may still also be recorded to the SYSLOG for better overall visibility.</p>
+    </blockquote>
+
+    <dl>
+        <dt><label for="SYSLOGBACKUP">Persist Redirected Logs on Reboot:</label></dt>
+        <dd>
+            <select class="nut-run" id="SYSLOGBACKUP" name="SYSLOGBACKUP" size="1">
+                <?=mk_option($nut_syslog_backup, "disable", "No");?>
+                <?=mk_option($nut_syslog_backup, "enable", "Yes");?>
+            </select>
+        </dd>
+    </dl>
+
+    <blockquote class="inline_help">
+        <p>This setting controls if the last 200 KB worth of redirected logs should persist over graceful system reboots.</p>
+        <p>It only has an effect on logfiles produced by <strong><em>Rule-Based Syslog Filters</em></strong> or <strong><em>Redirection for NUT Service Logs</em></strong>.</p>
+        <p>The settings regarding the system log (SYSLOG) itself are handled inside the OS-specific settings: <a href="/Settings/SyslogSettings" target="_blank"><strong><em>Syslog Server</em></strong></a></p>
+    </blockquote>
+        </div>
+    </details>
+
+    <details class="nut-sec" id="SEC_CUSTOM" open>
+        <summary>Custom Directives</summary>
+        <div class="nut-sec-body">
         <?=$nut_mc_field('CUSTOM_NUT', 'nut.conf', 'Extra <strong><em>nut.conf</em></strong> settings in shell syntax.', 'ALLOW_NO_DEVICE=true')?>
         <div id="CUSTOMSERVER">
             <?=$nut_mc_field('CUSTOM_UPSD', 'upsd.conf', 'Extra <strong><em>upsd.conf</em></strong> directives (e.g. <em>MAXAGE</em>).', 'MAXAGE 25')?>
             <?=$nut_mc_field('CUSTOM_USERS', 'upsd.users', 'Additional <strong><em>upsd.users</em></strong> users, each starting with a <em>[username]</em> line (e.g. for other NUT clients).', '[homeassistant]')?>
         </div>
-        <?=$nut_mc_field('CUSTOM_UPSMON', 'upsmon.conf', 'Extra <strong><em>upsmon.conf</em></strong> directives (e.g. <em>NOTIFYFLAG LOWBATT SYSLOG+EXEC</em>). Notification hook functions are kept in <strong><em>/boot/config/plugins/nut3/ups/xnut-notify-hooks.sh</em></strong> on the flash drive.', 'NOTIFYFLAG LOWBATT SYSLOG+EXEC')?>
-        <?=$nut_mc_field('CUSTOM_UPSSCHED', 'upssched.conf', 'Contents of <strong><em>upssched.conf</em></strong>, the plugin generates no upssched directives itself.', 'CMDSCRIPT /etc/nut/upssched-cmd')?>
-    </div>
+        <?=$nut_mc_field('CUSTOM_UPSMON', 'upsmon.conf', 'Extra <strong><em>upsmon.conf</em></strong> directives (e.g. <em>DEADTIME</em>). A directive with the same key as <strong><em>NOCOMMWARNTIME</em></strong>, <strong><em>FINALDELAY</em></strong>, <strong><em>HOSTSYNC</em></strong>, <strong><em>RBWARNTIME</em></strong> or <strong><em>NOTIFYFLAG</em></strong> <em>LOWBATT</em>, <em>FSD</em>, <em>COMMBAD</em>, <em>COMMOK</em>, <em>NOCOMM</em> or <em>SHUTDOWN</em> replaces the generated one, any other generated directive cannot be overridden. Notification hook functions are kept in <strong><em>/boot/config/plugins/nut3/ups/xnut-notify-hooks.sh</em></strong> on the flash drive.', 'NOTIFYFLAG LOWBATT SYSLOG+EXEC')?>
+        <?=$nut_mc_field('CUSTOM_UPSSCHED', 'upssched.conf', 'Contents of <strong><em>upssched.conf</em></strong>. The plugin only generates <strong><em>CMDSCRIPT</em></strong>, <strong><em>PIPEFN</em></strong> and <strong><em>LOCKFN</em></strong> (and the timers) while <strong><em>Only Alert for On Battery After</em></strong> or <strong><em>Run the EARLY_STAGE Hook After</em></strong> is above 0, a custom <em>CMDSCRIPT</em> then conflicts.', 'CMDSCRIPT /etc/nut/upssched-cmd')?>
+        </div>
+    </details>
+
 
     <br>
 
     <dl>
         <dt>
             <span>
-                <input class="nut-run" type="submit" name="#default" value="Default">
+                <input class="nut-run" type="submit" name="#default" formnovalidate value="Default">
                 <input id="RESETCONF" class="nut-run" type="button" value="Reset Config">
                 <input id="SCAN" class="nut-run" type="button" value="Auto Config">
             </span>
@@ -779,13 +963,13 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 
 <br>
 
-<form markdown="0" id="nut-display" name="nut_display" method="POST" action="/update.php" target="progressFrame">
+<form markdown="0" novalidate id="nut-display" name="nut_display" method="POST" action="/update.php" target="progressFrame">
     <input type="hidden" name="#file" value="<?=$sName?>/<?=$sName?>.cfg">
     <input type="hidden" id="command2" name="#command" value="/usr/local/emhttp/plugins/nut3/scripts/write_config" />
     <dl>
-        <dt>NUT Footer:</dt>
+        <dt><label for="FOOTER">NUT Footer:</label></dt>
         <dd>
-            <select name="FOOTER" size="1">
+            <select id="FOOTER" name="FOOTER" size="1">
                 <?=mk_option($nut_footer, 'disable', 'No');?>
                 <?=mk_option($nut_footer, 'enable', 'Yes');?>
             </select>
@@ -797,9 +981,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     </blockquote>
 
     <dl>
-        <dt>NUT Footer Style:</dt>
+        <dt><label for="FOOTER_STYLE">NUT Footer Style:</label></dt>
         <dd>
-            <select name="FOOTER_STYLE" size="1">
+            <select id="FOOTER_STYLE" name="FOOTER_STYLE" size="1">
                 <?=mk_option($nut_footer_style, '0', 'Default');?>
                 <?=mk_option($nut_footer_style, '1', 'Minimal');?>
             </select>
@@ -812,9 +996,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     </blockquote>
 
     <dl>
-        <dt>NUT Footer Show Slaves:</dt>
+        <dt><label for="FOOTER_CONNS">NUT Footer Show Slaves:</label></dt>
         <dd>
-            <select name="FOOTER_CONNS" size="1">
+            <select id="FOOTER_CONNS" name="FOOTER_CONNS" size="1">
                 <?=mk_option($nut_footer_conns, 'disable', 'No');?>
                 <?=mk_option($nut_footer_conns, 'enable', 'Yes');?>
             </select>
@@ -828,9 +1012,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     </blockquote>
 
     <dl>
-        <dt>NUT Automatic GUI Refresh:</dt>
+        <dt><label for="REFRESH">NUT Automatic GUI Refresh:</label></dt>
         <dd>
-            <select name="REFRESH" size="1">
+            <select id="REFRESH" name="REFRESH" size="1">
                 <?=mk_option($nut_refresh, 'disable', 'No');?>
                 <?=mk_option($nut_refresh, 'enable', 'Yes');?>
             </select>
@@ -842,9 +1026,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     </blockquote>
 
     <dl>
-        <dt>NUT Automatic GUI Refresh Interval:</dt>
+        <dt><label for="INTERVAL">NUT Automatic GUI Refresh Interval:</label></dt>
         <dd>
-            <input id="INTERVAL" type="text" class="narrow nut-numeric" name="INTERVAL" value="<?=$nut_interval?>">
+            <input id="INTERVAL" type="number" class="narrow" name="INTERVAL" value="<?=$nut_interval?>" min="1" max="3600" step="1" required data-err="Enter a whole number from 1 to 3600.">
         </dd>
     </dl>
 
@@ -853,7 +1037,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     </blockquote>
 
     <dl>
-        <dt>NUT Command Center Module:</dt>
+        <dt><label for="COMMANDS">NUT Command Center Module:</label></dt>
         <dd>
             <select id="COMMANDS" name="COMMANDS" size="1">
                 <?=mk_option($nut_commands, 'disable', 'No');?>
@@ -870,7 +1054,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 
     <div id="STATPREFS" style="<?=($showStatPrefs ? '' : 'display:none;');?>">
         <dl>
-        <dt>NUT Runtime Statistics Module:</dt>
+        <dt><label for="STATISTICS">NUT Runtime Statistics Module:</label></dt>
             <dd>
                 <select id="STATISTICS" name="STATISTICS" size="1">
                     <?=mk_option($nut_statistics, 'disable', 'No');?>
@@ -886,7 +1070,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 
         <div id="STATS-OR" style="display: none;">
             <dl>
-                <dt>NUT Runtime Statistics Polling Frequency:</dt>
+                <dt><label for="STATSPOLL">NUT Runtime Statistics Polling Frequency:</label></dt>
                     <dd>
                         <select id="STATSPOLL" name="STATSPOLL" size="1">
                             <?=mk_option($nut_stats_poll, '01min', 'Every 01 Minute(s)');?>
@@ -904,7 +1088,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             </blockquote>
 
             <dl>
-                <dt>NUT Runtime Statistics Variable Override:</dt>
+                <dt><label for="STATSOVERRIDE">NUT Runtime Statistics Variable Override:</label></dt>
                     <dd>
                         <select id="STATSOVERRIDE" name="STATSOVERRIDE" size="1">
                             <?=mk_option($nut_stats_override, 'disable', 'No');?>
@@ -923,94 +1107,94 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 
         <div id="STATS-OR-PREF" style="display: none;">
             <dl>
-                <dt><em>Statistics Chart 1 - UPS Variable:</em></dt>
+                <dt><label for="STATSCHART1VAR"><em>Statistics Chart 1 - UPS Variable:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART1VAR" type="text" name="STATSCHART1VAR" value="<?=$nut_stats_c1_var?>">
+                    <input id="STATSCHART1VAR" type="text" name="STATSCHART1VAR" value="<?=$nut_stats_c1_var?>" required pattern="[A-Za-z0-9._\-]+" data-err="Enter a UPS variable name, e.g. battery.charge.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 1 - Description Text:</em></dt>
+                <dt><label for="STATSCHART1TXT"><em>Statistics Chart 1 - Description Text:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART1TXT" type="text" name="STATSCHART1TXT" value="<?=$nut_stats_c1_txt?>">
+                    <input id="STATSCHART1TXT" type="text" name="STATSCHART1TXT" value="<?=$nut_stats_c1_txt?>" required data-err="A description is required.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 2 - UPS Variable:</em></dt>
+                <dt><label for="STATSCHART2VAR"><em>Statistics Chart 2 - UPS Variable:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART2VAR" type="text" name="STATSCHART2VAR" value="<?=$nut_stats_c2_var?>">
+                    <input id="STATSCHART2VAR" type="text" name="STATSCHART2VAR" value="<?=$nut_stats_c2_var?>" required pattern="[A-Za-z0-9._\-]+" data-err="Enter a UPS variable name, e.g. battery.charge.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 2 - Description Text:</em></dt>
+                <dt><label for="STATSCHART2TXT"><em>Statistics Chart 2 - Description Text:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART2TXT" type="text" name="STATSCHART2TXT" value="<?=$nut_stats_c2_txt?>">
+                    <input id="STATSCHART2TXT" type="text" name="STATSCHART2TXT" value="<?=$nut_stats_c2_txt?>" required data-err="A description is required.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 3 - UPS Variable:</em></dt>
+                <dt><label for="STATSCHART3VAR"><em>Statistics Chart 3 - UPS Variable:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART3VAR" type="text" name="STATSCHART3VAR" value="<?=$nut_stats_c3_var?>">
+                    <input id="STATSCHART3VAR" type="text" name="STATSCHART3VAR" value="<?=$nut_stats_c3_var?>" required pattern="[A-Za-z0-9._\-]+" data-err="Enter a UPS variable name, e.g. battery.charge.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 3 - Description Text:</em></dt>
+                <dt><label for="STATSCHART3TXT"><em>Statistics Chart 3 - Description Text:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART3TXT" type="text" name="STATSCHART3TXT" value="<?=$nut_stats_c3_txt?>">
+                    <input id="STATSCHART3TXT" type="text" name="STATSCHART3TXT" value="<?=$nut_stats_c3_txt?>" required data-err="A description is required.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 4 - UPS Variable:</em></dt>
+                <dt><label for="STATSCHART4VAR"><em>Statistics Chart 4 - UPS Variable:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART4VAR" type="text" name="STATSCHART4VAR" value="<?=$nut_stats_c4_var?>">
+                    <input id="STATSCHART4VAR" type="text" name="STATSCHART4VAR" value="<?=$nut_stats_c4_var?>" required pattern="[A-Za-z0-9._\-]+" data-err="Enter a UPS variable name, e.g. battery.charge.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 4 - Description Text:</em></dt>
+                <dt><label for="STATSCHART4TXT"><em>Statistics Chart 4 - Description Text:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART4TXT" type="text" name="STATSCHART4TXT" value="<?=$nut_stats_c4_txt?>">
+                    <input id="STATSCHART4TXT" type="text" name="STATSCHART4TXT" value="<?=$nut_stats_c4_txt?>" required data-err="A description is required.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 5 - UPS Variable:</em></dt>
+                <dt><label for="STATSCHART5VAR"><em>Statistics Chart 5 - UPS Variable:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART5VAR" type="text" name="STATSCHART5VAR" value="<?=$nut_stats_c5_var?>">
+                    <input id="STATSCHART5VAR" type="text" name="STATSCHART5VAR" value="<?=$nut_stats_c5_var?>" required pattern="[A-Za-z0-9._\-]+" data-err="Enter a UPS variable name, e.g. battery.charge.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 5 - Description Text:</em></dt>
+                <dt><label for="STATSCHART5TXT"><em>Statistics Chart 5 - Description Text:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART5TXT" type="text" name="STATSCHART5TXT" value="<?=$nut_stats_c5_txt?>">
+                    <input id="STATSCHART5TXT" type="text" name="STATSCHART5TXT" value="<?=$nut_stats_c5_txt?>" required data-err="A description is required.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 6 - UPS Variable:</em></dt>
+                <dt><label for="STATSCHART6VAR"><em>Statistics Chart 6 - UPS Variable:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART6VAR" type="text" name="STATSCHART6VAR" value="<?=$nut_stats_c6_var?>">
+                    <input id="STATSCHART6VAR" type="text" name="STATSCHART6VAR" value="<?=$nut_stats_c6_var?>" required pattern="[A-Za-z0-9._\-]+" data-err="Enter a UPS variable name, e.g. battery.charge.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 6 - Description Text:</em></dt>
+                <dt><label for="STATSCHART6TXT"><em>Statistics Chart 6 - Description Text:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART6TXT" type="text" name="STATSCHART6TXT" value="<?=$nut_stats_c6_txt?>">
+                    <input id="STATSCHART6TXT" type="text" name="STATSCHART6TXT" value="<?=$nut_stats_c6_txt?>" required data-err="A description is required.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 7 - UPS Variable:</em></dt>
+                <dt><label for="STATSCHART7VAR"><em>Statistics Chart 7 - UPS Variable:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART7VAR" type="text" name="STATSCHART7VAR" value="<?=$nut_stats_c7_var?>">
+                    <input id="STATSCHART7VAR" type="text" name="STATSCHART7VAR" value="<?=$nut_stats_c7_var?>" required pattern="[A-Za-z0-9._\-]+" data-err="Enter a UPS variable name, e.g. battery.charge.">
                 </dd>
             </dl>
             <dl>
-                <dt><em>Statistics Chart 7 - Description Text:</em></dt>
+                <dt><label for="STATSCHART7TXT"><em>Statistics Chart 7 - Description Text:</em></label></dt>
                 <dd>
-                    <input id="STATSCHART7TXT" type="text" name="STATSCHART7TXT" value="<?=$nut_stats_c7_txt?>">
+                    <input id="STATSCHART7TXT" type="text" name="STATSCHART7TXT" value="<?=$nut_stats_c7_txt?>" required data-err="A description is required.">
                 </dd>
             </dl>
         </div>
     </div>
 
     <dl>
-        <dt>UPS Power Display Override Settings:</dt>
+        <dt><label for="POWER">UPS Power Display Override Settings:</label></dt>
         <dd>
             <select id="POWER" name="POWER" size="1">
                 <?=mk_option($nut_power, "auto", "Auto");?>
@@ -1027,9 +1211,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
 
     <div id="POWER-SETTINGS">
         <dl>
-            <dt>UPS Nominal Watt Capacity (W):</dt>
+            <dt><label for="POWERW">UPS Nominal Watt Capacity (W):</label></dt>
             <dd>
-                <input id="POWERW" type="text" class="narrow nut-numeric" name="POWERW" value="<?=$nut_powerw?>">
+                <input id="POWERW" type="number" class="narrow" name="POWERW" value="<?=$nut_powerw?>" min="-1" max="1000000" step="1" required data-err="Enter a whole number from -1 to 1000000.">
             </dd>
         </dl>
 
@@ -1044,9 +1228,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
         </blockquote>
 
         <dl>
-            <dt>UPS Nominal Volt Ampere Capacity (VA):</dt>
+            <dt><label for="POWERVA">UPS Nominal Volt Ampere Capacity (VA):</label></dt>
             <dd>
-                <input id="POWERVA" type="text" class="narrow nut-numeric" name="POWERVA" value="<?=$nut_powerva?>">
+                <input id="POWERVA" type="number" class="narrow" name="POWERVA" value="<?=$nut_powerva?>" min="-1" max="1000000" step="1" required data-err="Enter a whole number from -1 to 1000000.">
             </dd>
         </dl>
 
@@ -1062,7 +1246,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     </div>
 
     <dl>
-        <dt>Force UPS Load Percentage Calculation:</dt>
+        <dt><label for="LOADCALC">Force UPS Load Percentage Calculation:</label></dt>
         <dd>
             <select id="LOADCALC" name="LOADCALC" size="1">
                 <?=mk_option($nut_loadcalc, "disable", "No");?>
@@ -1077,7 +1261,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     </blockquote>
 
     <dl>
-        <dt>UPS Load Percentage Calculation Unit:</dt>
+        <dt><label for="LOADUNIT">UPS Load Percentage Calculation Unit:</label></dt>
         <dd>
             <select id="LOADUNIT" name="LOADUNIT" size="1">
                 <?=mk_option($nut_loadunit, "W", "Watt (W)");?>
@@ -1092,7 +1276,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     </blockquote>
 
     <dl>
-        <dt>UPS Battery Runtime Measurement Unit:</dt>
+        <dt><label for="RTUNIT">UPS Battery Runtime Measurement Unit:</label></dt>
         <dd>
             <select id="RTUNIT" name="RTUNIT" size="1">
                 <?=mk_option($nut_rtunit, "seconds", "Seconds");?>
@@ -1109,7 +1293,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
     <dl>
         <dt>
             <span>
-                <input type="submit" name="#default" value="Default">
+                <input type="submit" name="#default" formnovalidate value="Default">
                 <input id="USBDIAGS" type="button" value="USB Diagnostics">
             </span>
         </dt>
@@ -1135,6 +1319,7 @@ function checkNUTsettings() {
     $('#DRIVERS').toggle(mode !== 'slave');
     $('#CUSTOMSERVER').toggle(mode !== 'slave');
     $('#UPSKILL').toggle(mode !== 'slave');
+    $('#TESTCONN').toggle(mode === 'slave');
     $('#SERIAL').prop('type', $('#DRIVER').val() == 'custom' ? 'text' : 'hidden');
     $('#snmp').toggle($('#DRIVER').val() == 'snmp-ups');
 
@@ -1180,6 +1365,13 @@ function checkRUNNING() {
     checkNUTsettings();
 }
 
+function checkBATTTEST() {
+    var v = $('#BATTTEST').val();
+    $('#BATTTEST-SETTINGS').toggle(v !== 'disable');
+    $('#BATTTESTWDAY').toggle(v === 'weekly');
+    $('#BATTTESTMDAY').toggle(v === 'monthly');
+}
+
 function checkPOWER() {
     if ($('#POWER')[0].selectedIndex < 1)
         $('#POWER-SETTINGS').hide();
@@ -1214,6 +1406,7 @@ function encData() {
 
 function applySettings(e) {
     e.preventDefault();
+    if (!nutValidate($('#nut-settings'))) return;
     encData();
     $.post('/plugins/nut3/include/nut_validate.php', $('#nut-settings').serialize(), function (data) {
         if (data && data.errors && data.errors.length) {
@@ -1227,6 +1420,38 @@ function applySettings(e) {
         decData();
         swal('Settings not applied', 'The settings could not be validated, please try again.', 'error');
     });
+}
+
+/* native constraint validation with inline messages; fields hidden by the current mode are skipped,
+ * and a collapsed section holding an invalid field is opened. Returns true if the form is valid. */
+function nutValidate($form) {
+    var first = null;
+    $form.find('.nut-field-err').remove();
+    $form.find('.nut-invalid').removeClass('nut-invalid').removeAttr('aria-invalid aria-describedby');
+    $form.find('input, select').each(function() {
+        if (this.disabled || this.type === 'hidden' || this.checkValidity()) return;
+        if ($(this).parentsUntil($form).filter(function() { return this.style.display === 'none'; }).length) return;
+        var eid = 'err-' + (this.id || this.name);
+        var msg = (this.validity.valueMissing || !this.dataset.err) ? this.validationMessage : this.dataset.err;
+        $(this).addClass('nut-invalid').attr({'aria-invalid': 'true', 'aria-describedby': eid})
+            .after($('<span class="nut-field-err" role="alert"></span>').attr('id', eid).text(msg));
+        first = first || this;
+    });
+    if (first) {
+        $(first).closest('details').prop('open', true);
+        first.focus();
+    }
+    return !first;
+}
+
+function TestConnection() {
+    var $b = $('#btnTestConn').prop('disabled', true);
+    var $r = $('#nut_testconn_result').html('<i class="fa fa-spinner fa-spin"></i> Testing...');
+    // POST: the webGui adds its CSRF token to every jQuery POST, a GET could be triggered by another site
+    $.post('/plugins/nut3/include/nut_testconn.php', {host: $('#IPADDR').val(), name: $('#NAME').val()}, null, 'json')
+        .done(function(d) { $r.html(d.html); }) // server-side escaped
+        .fail(function() { $r.html('<span class="nut-fail">Test failed: no valid answer from the server.</span>'); })
+        .always(function() { $b.prop('disabled', false); });
 }
 
 function RotateNUTLog() {
@@ -1293,18 +1518,16 @@ function extractAndChainBrTags(inputString) {
 }
 
 function getNUTclients() {
+  if (nutSkipIfHidden('getNUTclients', getNUTclients, <?=$nut_poll_ms?>)) return;
   $.get('/plugins/nut3/include/nut_clients.php', function(data) {
     if (data && data.success && data.success.response) {
         $('#nutclientsleft').html(extractAndChainBrTags(data.success.response));
         $('#nutclientsright').html(data.success.response);
     } else {
-        $('#nutclientsright').html("<i class='fa fa-times-circle' style='color:red;'></i> <em>Error (check logs)</em>");
+        $('#nutclientsright').html("<i class='fa fa-times-circle red-text'></i> <em>Error (check logs)</em>");
     }
   }, 'json');
-  clearTimeout(timers.getNUTclients);
-  <?if($nut_refresh == "enable"):?>
-  timers.getNUTclients = setTimeout(getNUTclients, <?=max(abs(isset($display['refresh']) ? $display['refresh'] : 0),($nut_interval * 1000))?>);
-  <?endif;?>
+  nutSchedule('getNUTclients', getNUTclients, <?=$nut_poll_ms?>);
 }
 <?endif;?>
 
@@ -1312,7 +1535,7 @@ $(function() {
     showStatus('upsmon');
 
     $('.nut-name').mask('ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ', {translation:  {'Z': {pattern: /[A-Za-z0-9_.-]/, optional: true}}});
-    $('.nut-ipaddr').mask('0ZZ.0ZZ.0ZZ.0ZZZZZZZZ', {translation:  {'Z': {pattern: /[0-9:]/, optional: true}}});
+    // no mask on .nut-ipaddr: it rewrote hostnames and IPv6 addresses (the field's pattern validates it instead)
 
     $('.nut-numeric').mask('ZZZZZZZZZZZZZZZ', {translation:  {'Z': {pattern: /[0-9-]/, optional: true}}});
     $('.nut-alphanumeric').mask('ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ', {translation:  {'Z': {pattern: /[A-Za-z0-9_.-]/, optional: true}}});
@@ -1344,6 +1567,19 @@ $(function() {
     // Unraid disables Apply until the form changes; an imported configuration must be applicable as is. Runs after the layout's own ready handler.
     setTimeout(function() { $('#btnApply').prop('disabled', false); });
 <?endif;?>
+    $('#nut-settings, #nut-display').on('input change', 'input, select', function() {
+        $(this).removeClass('nut-invalid').removeAttr('aria-invalid aria-describedby').next('.nut-field-err').remove();
+    });
+    $('#nut-display').on('submit', function(e) {
+        var s = e.originalEvent && e.originalEvent.submitter;
+        if (s && s.formNoValidate) return;
+        if (!nutValidate($(this))) e.preventDefault();
+    });
+    $('#btnTestConn').click(TestConnection);
+    // spans/links used as buttons: Enter and Space activate them
+    $('[role=button][tabindex]').keydown(function(e) {
+        if (e.which === 13 || e.which === 32) { e.preventDefault(); $(this).click(); }
+    });
 
     $('#DRIVER').change(checkNUTsettings);
     $('#SHUTDOWN').change(checkNUTsettings);
@@ -1355,11 +1591,13 @@ $(function() {
     $('#STATS-OR-PREF').change(checkNUTSTATsettings);
     $('#STATSPOLL').change(checkNUTSTATsettings);
     $('#POWER').change(checkPOWER);
+    $('#BATTTEST').change(checkBATTTEST);
 
     $('#RESTART').click(Restart);
 
     checkRUNNING();
     checkPOWER();
+    checkBATTTEST();
     checkNUTSTATsettings(false);
 
     decData();

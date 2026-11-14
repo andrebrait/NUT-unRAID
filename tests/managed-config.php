@@ -165,14 +165,16 @@ check($decoded('CUSTOM_NUT') === 'UPSD_OPTIONS="-D"', 'extra nut.conf directive 
 check($decoded('CUSTOM_UPSSCHED') === "CMDSCRIPT /etc/nut/upssched-cmd\nAT ONBATT * START-TIMER onbatt 30", 'upssched.conf kept');
 check(has($notes, 'more than one UPS section') && has($notes, 'Manual configuration mode'), 'import notes reported');
 $errors = nut_mc_validate($c);
-check(count($errors) === 6, 'customised import conflicts: ' . implode(' | ', $errors));
-foreach (['ups.conf (UPS section) directives, line 3: "port"', '[spare]', 'line 5: "driver"', 'line 6: "port"', 'user [remote]', '"NOTIFYFLAG"'] as $needle) {
+check(count($errors) === 3, 'customised import conflicts: ' . implode(' | ', $errors));
+foreach (['ups.conf (UPS section) directives, line 3: "port"', 'user [remote]', '"NOTIFYFLAG"'] as $needle) {
     check(has($errors, $needle), "customised import reports $needle");
 }
-$c['CUSTOM_UPS'] = $b("vendorid = \"051D\"\ndesc = \"Rack UPS 1\"\n");
+check(!has($errors, '[spare]') && !has($errors, 'line 5') && !has($errors, 'line 6'), 'the additional UPS section is not a conflict');
+$c['CUSTOM_UPS'] = $b("vendorid = \"051D\"\ndesc = \"Rack UPS 1\"\n[spare]\ndriver = nutdrv_qx\nport = auto\n");
 $c['CUSTOM_USERS'] = $b("[homeassistant]\npassword = ha\nupsmon slave\n");
 $c['CUSTOM_UPSMON'] = $b("NOTIFYFLAG LOWBATT SYSLOG+EXEC\nFINALDELAY 10\n");
 check(nut_mc_validate($c) === [], 'resolved import is valid: ' . implode(' | ', nut_mc_validate($c)));
+check(strpos(nut_mc_generate($c)['upsmon.conf'], "MONITOR spare@127.0.0.1 0 monuser \"Mon1tor!\" slave\n") !== false, 'the additional UPS is monitored without a say in shutdowns');
 
 // Manual mode as a slave: the monitor comes from upsmon.conf, the unused server files are not imported
 [$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'MODE' => 'slave'], [

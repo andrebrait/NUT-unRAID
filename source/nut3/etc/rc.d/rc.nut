@@ -30,8 +30,80 @@ PLGPATH="/boot/config/plugins/nut3"
 CONFIG=$PLGPATH/nut3.cfg
 DOCROOT="/usr/local/emhttp/plugins/nut3"
 
+# serialize service and config changes; shutdown paths (rc.6) stay lock-free.
+# -o keeps the lock fd out of the daemons this script starts.
+case "$1" in
+    start|start_upsmon|stop|reload|restart|write_config)
+        if [ -z "$RCNUT_LOCKED" ]; then
+            RCNUT_LOCKED=1 exec flock -o -w 180 /var/run/rc.nut.lock "$0" "$@"
+        fi
+        ;;
+esac
+# the guard is for this process only; it must not leak into the daemons and hooks started below
+unset RCNUT_LOCKED
+
 # read our configuration
 [ -e "$CONFIG" ] && source $CONFIG
+
+# scheduled battery self-test: cron file for nut-batttest, removed when the schedule is off
+write_batttest_cron() {
+    local f=/boot/config/plugins/dynamix/nut-batttest.cron h="${BATTTESTHOUR:-3}" wd="${BATTTESTWDAY:-0}" md="${BATTTESTMDAY:-1}" line=""
+    [[ "$h" =~ ^([0-9]|1[0-9]|2[0-3])$ ]] || h=3
+    [[ "$wd" =~ ^[0-6]$ ]] || wd=0
+    [[ "$md" =~ ^([1-9]|1[0-9]|2[0-8])$ ]] || md=1
+    case "$BATTTEST" in
+        weekly)  line="0 $h * * $wd /usr/sbin/nut-batttest > /dev/null 2>&1" ;;
+        monthly) line="0 $h $md * * /usr/sbin/nut-batttest > /dev/null 2>&1" ;;
+    esac
+    if [ -n "$line" ]; then
+        # only touch the flash (and cron) when the schedule changed
+        if [ "$(cat "$f" 2>/dev/null)" != "$(printf '# NUT scheduled battery self-test\n%s' "$line")" ]; then
+            printf '# NUT scheduled battery self-test\n%s\n' "$line" > "$f"
+            update_cron
+        fi
+    elif [ -f "$f" ]; then
+        rm -f "$f"
+        update_cron
+    fi
+}
+
+# true if the driver for UPS $1 (default: the GUI-configured UPS name) is running
+monitored_driver_running() {
+    local pidfile
+    for pidfile in /var/run/nut/*-"${1:-$NAME}".pid; do
+        [ -e "$pidfile" ] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+# UPS section names of ups.conf, one per line
+ups_sections() {
+    sed -n 's/^[[:space:]]*\[\([^]][^]]*\)\].*/\1/p' /etc/nut/ups.conf 2>/dev/null
+}
+
+# retry drivers that are not running yet (USB devices can be slow to appear after boot or an outage)
+# fails if no driver can be retried at all (no or unreadable ups.conf, no UPS section): nothing was started
+retry_drivers() {
+    local try ups missing sections
+    mapfile -t sections < <(ups_sections)
+    [ "${#sections[@]}" -gt 0 ] || return 1
+    for try in 1 2 3; do
+        missing=()
+        for ups in "${sections[@]}"; do
+            monitored_driver_running "$ups" || missing+=("$ups")
+        done
+        [ "${#missing[@]}" -eq 0 ] && return 0
+        echo "NUT driver(s) not running: ${missing[*]}, retrying in 10 seconds (attempt ${try}/3)..."
+        sleep 10
+        for ups in "${missing[@]}"; do
+            /usr/sbin/upsdrvctl -u root -- start "$ups"
+        done
+    done
+    for ups in "${sections[@]}"; do
+        monitored_driver_running "$ups" || return 1
+    done
+    return 0
+}
 
 error_at_start() {
     if [ -d $DOCROOT/misc ]; then
@@ -41,7 +113,31 @@ error_at_start() {
 }
 
 start_driver() {
-    /usr/sbin/upsdrvctl -u root start || error_at_start
+    if ! /usr/sbin/upsdrvctl -u root start && ! retry_drivers; then
+        # upsdrvctl fails if any one driver fails. Only abort when no driver
+        # is running at all; otherwise carry on so upsd and upsmon still
+        # protect the system with the UPS devices that did come up.
+        if ! pgrep -f "^$DRIVERPATH/" >/dev/null 2>&1; then
+            if [ -x /usr/local/emhttp/webGui/scripts/notify ]; then
+                timeout -s9 15 /usr/local/emhttp/webGui/scripts/notify -e "NUT" -s "NUT: UPS driver failed to start" -d "No UPS driver started; this system will not shut down on power loss. Check the SYSLOG." -i alert >/dev/null 2>&1
+            fi
+            error_at_start
+        fi
+        echo "WARNING: NUT failed to start one or more UPS drivers, continuing with the drivers that did start."
+        SUBJECT="NUT: UPS driver failed to start"
+        DESCRIPTION="One or more UPS drivers failed to start; NUT is running with the remaining drivers. Check the SYSLOG."
+        LEVEL="warning"
+        # upsmon still starts (so NOCOMM alerts fire), but say loudly that shutdown protection is gone
+        if ! monitored_driver_running; then
+            echo "ERROR: The driver for the monitored UPS [${NAME}] is not running, this system is NOT protected by NUT."
+            SUBJECT="NUT: monitored UPS [${NAME}] driver failed to start"
+            DESCRIPTION="The driver for the monitored UPS [${NAME}] is not running, so this system will NOT shut down on power loss. Check the SYSLOG."
+            LEVEL="alert"
+        fi
+        if [ -x /usr/local/emhttp/webGui/scripts/notify ]; then
+            timeout -s9 15 /usr/local/emhttp/webGui/scripts/notify -e "NUT" -s "$SUBJECT" -d "$DESCRIPTION" -i "$LEVEL" >/dev/null 2>&1
+        fi
+    fi
 }
 
 start_upsd() {
@@ -111,6 +207,12 @@ stop() {
             fi
         done
     fi
+
+    # on-battery workers and upssched timers must not outlive the services (a stale worker can still set FSD)
+    # anchored on the command line start: a bare substring would also kill e.g. an ssh or bash -c that merely mentions the path
+    pkill -f -- '^((/usr)?/bin/bash[[:space:]]+|bash[[:space:]]+)?/usr/sbin/nut-notify([[:space:]]|$)' 2>/dev/null
+    pkill -x upssched 2>/dev/null
+    rm -f /var/run/nut/upssched.pipe /var/run/nut/upssched.lock
 
     sleep 2
 
@@ -190,17 +292,21 @@ add_rc6_hook() {
     fi
 }
 
+# generate the NUT configuration files from the settings onto the flash drive
+# (or keep using a previous configuration whose imported settings await review)
+generate_config() {
+    if ! /usr/bin/php $DOCROOT/scripts/managed_config write; then
+        echo "ERROR: The NUT settings are invalid, so the NUT configuration was not updated and NUT will not start."
+        echo "ERROR: Correct the problems shown on the NUT Settings page."
+        return 1
+    fi
+}
+
 write_config() {
     echo "Writing NUT configuration..."
     local RETVAL=0
 
-    # generate the NUT configuration files from the settings onto the flash drive
-    # (or keep using a previous configuration whose imported settings await review)
-    if ! /usr/bin/php $DOCROOT/scripts/managed_config write; then
-        echo "ERROR: The NUT settings are invalid, so the NUT configuration was not updated and NUT will not start."
-        echo "ERROR: Correct the problems shown on the NUT Settings page."
-        RETVAL=1
-    fi
+    generate_config || RETVAL=1
 
     # the flash drive holds the generated files and any user files (e.g. xnut-notify-hooks.sh)
     mkdir -p /etc/nut
@@ -365,17 +471,83 @@ write_config() {
         sleep 1
     fi
 
+    write_batttest_cron
+
     # NUT Runtime Statistics Module
     /etc/rc.d/rc.nutstats check
 
     return $RETVAL
 }
 
+# UPS names to power off: the configured UPS plus every local UPS that upsmon.conf monitors with a power value above 0
+# (legacy redundant setups, any role); UPSes with power value 0 are only watched and stay on, remote systems are not ours.
+# The word splitting follows NUT's parseconf (quotes, backslash escapes, # comments); malformed lines are skipped.
+monitored_power_ups() {
+    awk '
+    function words(line,    i, ch, st, have, cur) {
+        nw = 0; st = 0; have = 0
+        for (i = 1; i <= length(line); i++) {
+            ch = substr(line, i, 1)
+            if (st == 0) {
+                if (ch == "#") break
+                if (ch ~ /[ \t\r\f\v]/) continue
+                if (ch == "=") { w[++nw] = "="; continue }
+                cur = ""; have = 1
+                if (ch == "\"") st = 3
+                else if (ch == "\\") st = 2
+                else { cur = ch; st = 1 }
+            } else if (st == 1) {
+                if (ch == "#") { w[++nw] = cur; have = 0; break }
+                if (ch ~ /[ \t\r\f\v=]/) { w[++nw] = cur; if (ch == "=") w[++nw] = "="; have = 0; st = 0; continue }
+                if (ch == "\\") st = 2
+                else cur = cur ch
+            } else if (st == 2) {
+                cur = cur ch; st = 1
+            } else if (st == 3) {
+                if (ch == "#") return 0
+                if (ch == "\"") { w[++nw] = cur; have = 0; st = 0 }
+                else if (ch == "\\") st = 4
+                else cur = cur ch
+            } else {
+                cur = cur ch; st = 3
+            }
+        }
+        if (st == 2 || st >= 3) return 0
+        if (have) w[++nw] = cur
+        return 1
+    }
+    {
+        if (!words($0) || nw < 6 || toupper(w[1]) != "MONITOR") next
+        if (w[3] !~ /^[0-9]+$/ || w[3] + 0 == 0) next
+        at = index(w[2], "@")
+        if (at < 2) next
+        if (tolower(substr(w[2], at + 1)) ~ /^((127\.0\.0\.1|localhost|\[::1\])(:[0-9]+)?|::1)$/) print substr(w[2], 1, at - 1)
+    }' /etc/nut/upsmon.conf 2>/dev/null
+}
+
+# power off the UPS inverters; each name goes to upsdrvctl on its own, never an empty one (that would mean every driver)
+shutdown_ups() {
+    local ups rc=0 seen=" " monitored=()
+    mapfile -t monitored < <(monitored_power_ups)
+    for ups in "$NAME" "${monitored[@]}"; do
+        if ! [[ "$ups" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "ERROR: Cannot shut down the UPS: invalid UPS name [${ups}]." | logger -t "rc.nut"
+            rc=1
+            continue
+        fi
+        [[ "$seen" == *" $ups "* ]] && continue
+        seen="$seen$ups "
+        echo "NUT is shutting down the UPS inverter [${ups}]..."
+        # "--": a name with a leading hyphen is never read as an option
+        /usr/sbin/upsdrvctl -u root -- shutdown "$ups" || rc=1
+    done
+    return $rc
+}
+
 case "$1" in
-    shutdown) # shuts down the UPS driver
-        if [ -f /etc/nut/killpower ]; then
-            echo "NUT is shutting down the UPS inverter..."
-            /usr/sbin/upsdrvctl -u root shutdown
+    shutdown) # shuts down the UPS driver(s)
+        if [ -f /etc/nut/killpower ] && [ "$MODE" != "slave" ]; then
+            shutdown_ups || exit 1
         fi
         ;;
     start)  # starts everything (for a ups server box)
@@ -392,10 +564,9 @@ case "$1" in
         ;;
     stop) # stops all UPS-related daemons
         sleep 1
-        write_config
-        sleep 1
         stop
         sleep 1
+        write_config
         check_down
         ;;
     reload)
@@ -411,10 +582,12 @@ case "$1" in
         ;;
     restart)
         sleep 1
-        # keep the running services if the new configuration is invalid
-        write_config || error_at_start
+        # invalid settings keep the running services; /etc/nut still holds the files they were started with
+        generate_config || error_at_start
         sleep 1
-        stop
+        stop # with the old configuration: upsdrvctl stop must see the drivers that are running
+        sleep 1
+        write_config || error_at_start
         sleep 3
         start
         ;;

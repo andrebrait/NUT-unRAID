@@ -10,6 +10,10 @@ if [ ! -f "$data/upsc.txt" ]; then
     echo "Error: Connection failure: Connection refused" >&2
     exit 1
 fi
+if [ "$1" = -l ]; then
+    echo "ups: Test UPS"
+    exit 0
+fi
 if [ -n "$2" ]; then
     awk -v var="$2" 'index($0, var ": ") == 1 { print substr($0, length(var) + 3); found = 1; exit } END { exit !found }' "$data/upsc.txt" && exit 0
     echo "Error: Variable not supported by UPS" >&2
