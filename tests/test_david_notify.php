@@ -710,7 +710,7 @@ $listen = [
     'port that is not a number' => ["LISTEN 127.0.0.1 abc\n", []],
     'port zero' => ["LISTEN 127.0.0.1 0\n", []],
     'port above 65535' => ["LISTEN 127.0.0.1 65536\n", []],
-    'line with extra words' => ["LISTEN 127.0.0.1 3494 extra\n", []],
+    'extra LISTEN words are ignored by NUT' => ["LISTEN 127.0.0.1 3494 extra\n", ['v4p', 'mappedp']],
     // parseconf reads logical lines: a backslash before a newline joins the next physical line to the same word, with nothing in between
     'a backslash joins the lines inside the address' => ["LISTEN 127.0.\\\n0.1\n", ['v4', 'mapped']],
     'a backslash joins the lines inside the port' => ["LISTEN 127.0.0.1 349\\\n4\n", ['v4p', 'mappedp']],

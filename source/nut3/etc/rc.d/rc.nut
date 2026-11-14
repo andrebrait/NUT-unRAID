@@ -637,8 +637,8 @@ monitored_power_ups() {
     function listen(    lp, a, k) {
         if (w[1] != "LISTEN") return
         nlisten++
-        if (nw < 2 || nw > 3) return
-        lp = (nw == 3 ? w[3] : 3493)
+        if (nw < 2) return
+        lp = (nw >= 3 ? w[3] : 3493)
         if (!okport(lp)) return
         lp += 0; a = tolower(w[2]); k = v6kind(a)
         if (a == "127.0.0.1" || a == "0.0.0.0") l4[lp] = 1
