@@ -75,6 +75,7 @@ function nut_rows_cache_file($name, $ip) {
 
 /* The rows of a fresh cache entry, [] if there is none. */
 function nut_rows_cache_load($file) {
+    clearstatcache(true, $file);
     $st = @lstat($file); // lstat: a symlink is not followed
     $uid = function_exists('posix_geteuid') ? posix_geteuid() : getmyuid();
     if (!$st || ($st['mode'] & 0170000) !== 0100000 || $st['uid'] !== $uid || (time() - $st['mtime']) >= NUT_ROWS_CACHE_TTL) return [];
