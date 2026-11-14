@@ -77,29 +77,85 @@ foreach (['ups', 'spare', 'third'] as $name) {
         && strpos($timed['upssched.conf'], "AT ONBATT $name@127.0.0.1 START-TIMER early:$name@127.0.0.1 10\n") !== false, "upssched timers cover $name");
 }
 
-// ---- a custom MONITOR line for an additional UPS replaces the generated one --------------------------------------
-$own = array_merge($multi, ['CUSTOM_UPSMON' => $b("MONITOR spare@localhost 1 monuser pass master\n")]);
+// ---- a custom MONITOR line replaces the generated one only if it certainly reaches the generated upsd ---------------
+// Standalone mode generates LISTEN 127.0.0.1: only IPv4 on port 3493 is certain. localhost may resolve to ::1, where
+// another daemon could answer, so it replaces nothing: the UPS stays watched and the custom line is kept next to the
+// generated one, no local UPS is ever left unmonitored. rc.nut applies the same rules when it powers the UPSes off.
+$own = array_merge($multi, ['CUSTOM_UPSMON' => $b("MONITOR spare@127.0.0.1 1 monuser pass master\n")]);
 check(nut_mc_validate($own) === [], 'a custom MONITOR line for an additional UPS is valid: ' . implode(' | ', nut_mc_validate($own)));
 $mon = monitors(nut_mc_generate($own)['upsmon.conf']);
-check($mon === ['ups@127.0.0.1' => ['1', 'master'], 'third@127.0.0.1' => ['0', 'slave'], 'spare@localhost' => ['1', 'master']],
+check($mon === ['ups@127.0.0.1' => ['1', 'master'], 'third@127.0.0.1' => ['0', 'slave'], 'spare@127.0.0.1' => ['1', 'master']],
     'the custom MONITOR line replaces the generated one for that UPS only');
 check(has(nut_mc_validate(array_merge($multi, ['CUSTOM_UPSMON' => $b("MONITOR ups@127.0.0.1 1 monuser pass master\n")])), '"MONITOR"'),
     'the MONITOR line of the shutdown UPS cannot be overridden');
-check(nut_mc_local_ups('spare@127.0.0.1') === 'spare' && nut_mc_local_ups('spare@localhost:3493') === 'spare' && nut_mc_local_ups('spare@[::1]') === 'spare'
-    && nut_mc_local_ups('spare@10.0.0.2') === null && nut_mc_local_ups('spare') === null, 'only this machine\'s UPSes count as local');
+foreach (["monitor spare@127.0.0.1 0 monuser pass slave\n", "MONITOR spare@127.0.0.1\n"] as $invalid) {
+    $invalidCustom = array_merge($multi, ['CUSTOM_UPSMON' => $b($invalid)]);
+    check(strpos(nut_mc_generate($invalidCustom)['upsmon.conf'], 'MONITOR spare@127.0.0.1 0 monuser "monpass" slave') !== false,
+        'an invalid or mis-cased monitor must not suppress monitoring of the local UPS');
+}
+// MONITOR lines for the UPS spare in the generated upsmon.conf of $c when it holds the custom line for $system:
+// 1 = only the custom line (it replaced the generated one), 2 = the generated watch-only line stays next to it
+$lines = fn(array $c, $system) => substr_count(nut_mc_generate(array_merge($c, ['CUSTOM_UPSMON' => $b("MONITOR $system 1 monuser pass master\n")]))['upsmon.conf'], 'MONITOR spare@');
+foreach (['spare@127.0.0.1', 'spare@127.0.0.1:3493', 'spare@[::ffff:127.0.0.1]', 'spare@[::FFFF:7f00:1]:3493', 'spare@[127.0.0.1]'] as $system) {
+    check($lines($multi, $system) === 1, "standalone: $system replaces the generated monitor");
+}
+foreach (['spare@localhost', 'spare@LOCALHOST:3493', 'spare@[::1]', 'spare@::1', 'spare@127.0.0.1:3494', 'spare@localhost:3494', 'spare@[::1]:3494', 'spare@10.0.0.2'] as $system) {
+    check($lines($multi, $system) === 2, "standalone: $system leaves the UPS watched by the generated monitor");
+}
+// netserver mode listens on the LISTEN setting, in its order: [::1] needs ::1 (or :: with no address after it, as
+// 2.7.4 binds the lines last to first), localhost needs both families. Columns: 127.0.0.1, [::1], localhost.
+$listening = [
+    '0.0.0.0' => [1, 2, 2],
+    '0.0.0.0 ::' => [1, 1, 1],
+    ':: 0.0.0.0' => [1, 2, 2],
+    '127.0.0.1 ::1' => [1, 1, 1],
+    '127.0.0.1 192.168.1.2 ::' => [1, 1, 1],
+    ':: 192.168.1.2 127.0.0.1' => [1, 2, 2],
+];
+foreach ($listening as $addresses => $expected) {
+    $net = array_merge($multi, ['MODE' => 'netserver', 'LISTEN' => $addresses]);
+    check(nut_mc_validate($net) === [], "netserver LISTEN $addresses is valid: " . implode(' | ', nut_mc_validate($net)));
+    foreach (['spare@127.0.0.1', 'spare@[::1]', 'spare@localhost'] as $i => $system) {
+        check($lines($net, $system) === $expected[$i], "netserver LISTEN $addresses: $system " . ($expected[$i] === 1 ? 'replaces' : 'does not replace') . ' the generated monitor');
+    }
+}
 
-// a loopback system on another port is another server's: the local UPS is still watched on the default port
-check(nut_mc_local_ups('spare@127.0.0.1:3494') === null && nut_mc_local_ups('spare@localhost:3494') === null && nut_mc_local_ups('spare@[::1]:3494') === null
-    && nut_mc_local_ups('spare@127.0.0.1:3493') === 'spare' && nut_mc_local_ups('spare@[::1]:3493') === 'spare', 'only the default port is this machine\'s upsd');
-check(nut_mc_local_ups('spare@127.0.0.1:3494', true) === 'spare' && nut_mc_local_ups('spare@10.0.0.2:3493', true) === null, 'any port counts as local when asked, other hosts never');
-check(nut_mc_local_ups('spare@::1:3493', true) === null && nut_mc_local_ups('spare@[::1', true) === null && nut_mc_local_ups('spare@::1]', true) === null, 'a malformed loopback address is not one');
+// the loopback families the generated upsd certainly listens on
+$families = function ($mode, $listen = '0.0.0.0') {
+    $found = array_keys(nut_mc_listen_families(['MODE' => $mode, 'LISTEN' => $listen]));
+    sort($found);
+    return $found;
+};
+check($families('standalone', '::') === [4] && $families('slave') === [], 'standalone mode listens on 127.0.0.1 only, slave mode runs no upsd');
+foreach (['0.0.0.0' => [4], '127.0.0.1 192.168.1.2' => [4], '::1' => [6], '::' => [6], '0.0.0.0 ::' => [4, 6], ':: 0.0.0.0' => [4], '192.168.1.2 ::' => [6],
+    ':: 192.168.1.2' => [], '::1 0.0.0.0' => [4, 6], '0:0:0:0:0:0:0:1 0.0.0.0' => [4, 6], ':: ::1' => [6], '::ffff:127.0.0.1' => [], 'localhost' => [], '192.168.1.2' => []] as $addresses => $expected) {
+    check($families('netserver', $addresses) === $expected, "netserver LISTEN $addresses certainly listens on the loopback families [" . implode(',', $expected) . '], got [' . implode(',', $families('netserver', $addresses)) . ']');
+}
+
+// which systems certainly reach it: the default port and every family the host can resolve to
+$v4 = [4 => true];
+$v6 = [6 => true];
+$both = [4 => true, 6 => true];
+foreach ([
+    'spare@127.0.0.1' => [true, false, true], 'spare@127.0.0.1:3493' => [true, false, true], 'spare@127.0.0.1:03493' => [true, false, true], 'spare@[127.0.0.1]:3493' => [true, false, true],
+    'spare@[::ffff:127.0.0.1]' => [true, false, true], 'spare@[0:0:0:0:0:ffff:7f00:1]:3493' => [true, false, true],
+    'spare@[::1]' => [false, true, true], 'spare@[::1]:3493' => [false, true, true], 'spare@[0:0:0:0:0:0:0:1]' => [false, true, true],
+    'spare@localhost' => [false, false, true], 'spare@LocalHost:3493' => [false, false, true],
+    'spare@127.0.0.1:3494' => [false, false, false], 'spare@localhost:3494' => [false, false, false], 'spare@[::1]:3494' => [false, false, false],
+    'spare@::1' => [false, false, false], 'spare@::1:3493' => [false, false, false], 'spare@[::1' => [false, false, false], 'spare@::1]' => [false, false, false],
+    'spare@[::ffff:192.168.1.5]' => [false, false, false], 'spare@[2001:db8::1]' => [false, false, false], 'spare@10.0.0.2' => [false, false, false], 'spare' => [false, false, false],
+] as $system => [$onV4, $onV6, $onBoth]) {
+    $got = [nut_mc_local_ups($system, $v4) === 'spare', nut_mc_local_ups($system, $v6) === 'spare', nut_mc_local_ups($system, $both) === 'spare'];
+    check($got === [$onV4, $onV6, $onBoth] && nut_mc_local_ups($system, []) === null, "$system is certain on [IPv4, IPv6, both] = " . json_encode([$onV4, $onV6, $onBoth]) . ', got ' . json_encode($got));
+}
+// without the families any loopback spelling on any port is a loopback line (it tells the lines of another UPS apart)
+check(nut_mc_local_ups('spare@127.0.0.1:3494') === 'spare' && nut_mc_local_ups('spare@::1') === 'spare' && nut_mc_local_ups('spare@localhost') === 'spare'
+    && nut_mc_local_ups('spare@10.0.0.2:3493') === null && nut_mc_local_ups('spare@::1:3493') === null && nut_mc_local_ups('spare@[::1') === null && nut_mc_local_ups('spare@::1]') === null,
+    'any loopback spelling counts as a loopback line, other hosts and malformed addresses never');
 $elsewhere = array_merge($multi, ['CUSTOM_UPSMON' => $b("MONITOR spare@127.0.0.1:3494 1 monuser pass master\n")]);
 check(nut_mc_validate($elsewhere) === [], 'a custom MONITOR line on another port is valid: ' . implode(' | ', nut_mc_validate($elsewhere)));
 check(monitors(nut_mc_generate($elsewhere)['upsmon.conf']) === ['ups@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['0', 'slave'], 'third@127.0.0.1' => ['0', 'slave'],
     'spare@127.0.0.1:3494' => ['1', 'master']], 'a custom MONITOR line on another port does not replace the generated one');
-$default = array_merge($multi, ['CUSTOM_UPSMON' => $b("MONITOR spare@LOCALHOST:3493 1 monuser pass master\n")]);
-check(monitors(nut_mc_generate($default)['upsmon.conf']) === ['ups@127.0.0.1' => ['1', 'master'], 'third@127.0.0.1' => ['0', 'slave'], 'spare@LOCALHOST:3493' => ['1', 'master']],
-    'a custom MONITOR line on the default port replaces the generated one');
 
 // ---- validation -------------------------------------------------------------------------------------------------
 $errors = fn($custom, array $more = []) => nut_mc_validate(array_merge($defaults, ['CUSTOM_UPS' => $b($custom)], $more));
@@ -125,25 +181,43 @@ check(array_keys(monitors(nut_mc_generate($slave)['upsmon.conf'])) === ['remote@
 $legacyUps = "maxretry = 3\n[spare]\n\tdriver = nutdrv_qx\n\tport = auto\n[rack]\n\tdriver = usbhid-ups\n\tport = auto\n\tvendorid = 051D\n";
 [$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], [
     'ups.conf' => $legacyUps,
-    'upsmon.conf' => "MONITOR rack@127.0.0.1 1 monuser pass master\nMONITOR spare@localhost 1 monuser pass master\nMINSUPPLIES 1\n",
+    'upsmon.conf' => "MONITOR rack@127.0.0.1 1 monuser pass master\nMONITOR spare@127.0.0.1 1 monuser pass master\nMINSUPPLIES 1\n",
 ]);
 check($c['NAME'] === 'rack' && nut_mc_decode($c['CUSTOM_UPSGLOBAL']) === 'maxretry = 3', 'the UPS named in the settings stays the shutdown UPS');
 check(nut_mc_decode($c['CUSTOM_UPS']) === "vendorid = 051D\n[spare]\ndriver = nutdrv_qx\nport = auto", 'leftover directives come before the additional sections');
-check(nut_mc_decode($c['CUSTOM_UPSMON']) === "MONITOR spare@localhost 1 monuser pass master\nMINSUPPLIES 1", 'custom MONITOR and MINSUPPLIES lines are kept');
+check(nut_mc_decode($c['CUSTOM_UPSMON']) === "MONITOR spare@127.0.0.1 1 monuser pass master\nMINSUPPLIES 1", 'custom MONITOR and MINSUPPLIES lines are kept');
 check(has($notes, 'more than one UPS section') && has($notes, '[spare]') && has($notes, 'power value 1'), 'the import reports the kept sections and the kept power value: ' . implode(' | ', $notes));
-check(!has($notes, 'only watched'), 'a UPS with its own MONITOR line is not reported as generated');
+check(!has($notes, 'generated watch-only MONITOR'), 'a UPS with its own MONITOR line is not reported as generated');
 check(nut_mc_validate($c) === [], 'the imported multi-UPS configuration is valid as it is: ' . implode(' | ', nut_mc_validate($c)));
 $out = nut_mc_generate($c);
 $ups = sections($out['ups.conf']);
 check(array_keys($ups) === ['rack', 'spare'] && ($ups['rack']['vendorid'] ?? null) === '051D' && !isset($ups['spare']['vendorid']), 'the imported sections keep their own directives');
-check(monitors($out['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@localhost' => ['1', 'master']], 'the imported MONITOR lines are kept, none is added twice');
+check(monitors($out['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['1', 'master']], 'the imported MONITOR lines are kept, none is added twice');
+
+// a legacy monitor of localhost is kept, but it does not replace the generated one: standalone upsd listens on 127.0.0.1 only
+[$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], [
+    'ups.conf' => $legacyUps,
+    'upsmon.conf' => "MONITOR rack@127.0.0.1 1 monuser pass master\nMONITOR spare@localhost 1 monuser pass master\n",
+]);
+check(nut_mc_decode($c['CUSTOM_UPSMON']) === 'MONITOR spare@localhost 1 monuser pass master' && nut_mc_validate($c) === [], 'the localhost monitor is kept as a custom directive: ' . implode(' | ', nut_mc_validate($c)));
+check(has($notes, 'generated watch-only MONITOR') && has($notes, 'for [spare]') && has($notes, 'localhost needs both IPv4 and IPv6') && has($notes, 'power value 1') && has($notes, 'may affect shutdown'), 'the import distinguishes the generated watcher from the custom power-bearing monitor: ' . implode(' | ', $notes));
+check(monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['0', 'slave'], 'spare@localhost' => ['1', 'master']],
+    'the UPS stays watched next to the kept localhost line');
+// listening on both families makes the same line certain, it replaces the generated one
+[$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack', 'MODE' => 'netserver'], [
+    'ups.conf' => $legacyUps,
+    'upsmon.conf' => "MONITOR rack@127.0.0.1 1 monuser pass master\nMONITOR spare@localhost 1 monuser pass master\n",
+    'upsd.conf' => "LISTEN 0.0.0.0\nLISTEN ::\n",
+]);
+check($c['LISTEN'] === '0.0.0.0 ::' && !has($notes, 'generated watch-only MONITOR'), 'a localhost monitor is certain when upsd listens on IPv4 and IPv6: ' . implode(' | ', $notes));
+check(monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@localhost' => ['1', 'master']], 'it replaces the generated monitor in that case');
 
 // no MONITOR line for the other UPS: it is generated with power value 0
 [$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], [
     'ups.conf' => $legacyUps,
     'upsmon.conf' => "MONITOR rack@127.0.0.1 1 monuser pass master\n",
 ]);
-check(has($notes, '[spare] is now only watched') && nut_mc_validate($c) === [], 'an unmonitored section is reported as watched only');
+check(has($notes, 'generated watch-only MONITOR') && has($notes, 'for [spare]') && nut_mc_validate($c) === [], 'an unmonitored section receives a generated watcher');
 check(monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['0', 'slave']], 'an unmonitored section is generated with power value 0');
 
 // a MONITOR line of another UPS on another port is kept as it is, and that UPS is still watched on the default port
@@ -153,15 +227,15 @@ check(monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1'
 ]);
 check($c['MONUSER'] === 'monuser' && nut_mc_decode($c['CUSTOM_UPSMON']) === 'MONITOR spare@127.0.0.1:3494 1 observer obspass slave',
     'the MONITOR line on another port stays a custom directive, credentials included');
-check(has($notes, '[spare] is now only watched') && has($notes, 'power value 1') && nut_mc_validate($c) === [], 'the import reports the generated watch line and the kept power value: ' . implode(' | ', $notes));
+check(has($notes, 'generated watch-only MONITOR') && has($notes, 'for [spare]') && has($notes, 'power value 1') && nut_mc_validate($c) === [], 'the import reports the generated watch line and the kept power value: ' . implode(' | ', $notes));
 check(monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1' => ['0', 'slave'], 'spare@127.0.0.1:3494' => ['1', 'slave']],
     'the UPS is watched on the default port next to the kept line');
 // the same line on the default port replaces the generated one
 [$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], [
     'ups.conf' => $legacyUps,
-    'upsmon.conf' => "MONITOR rack@127.0.0.1 1 monuser pass master\nMONITOR spare@localhost:3493 0 observer obspass slave\n",
+    'upsmon.conf' => "MONITOR rack@127.0.0.1 1 monuser pass master\nMONITOR spare@127.0.0.1:3493 0 observer obspass slave\n",
 ]);
-check(!has($notes, 'only watched') && monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@localhost:3493' => ['0', 'slave']],
+check(!has($notes, 'generated watch-only MONITOR') && monitors(nut_mc_generate($c)['upsmon.conf']) === ['rack@127.0.0.1' => ['1', 'master'], 'spare@127.0.0.1:3493' => ['0', 'slave']],
     'a MONITOR line on the default port is not generated twice');
 // alone, the other port's line must not turn into the shutdown UPS's monitor account
 [$c, $notes] = nut_mc_import(['MANUAL' => 'enable', 'NAME' => 'rack'], ['ups.conf' => $legacyUps, 'upsmon.conf' => "MONITOR spare@127.0.0.1:3494 0 observer obspass slave\n"]);

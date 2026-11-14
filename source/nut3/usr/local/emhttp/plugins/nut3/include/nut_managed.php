@@ -191,13 +191,49 @@ function nut_mc_extra_ups(array $c) {
     return array_values(array_unique(array_column($headers, 'section')));
 }
 
-/* UPS name of a MONITOR system ("name@host[:port]") on this machine's loopback, null for any other system. Unless
- * $anyPort, only the system without a port or on NUT's default port 3493 counts: that is where the generated upsd
- * listens, a system on another port is another server's. The forms are those of rc.nut's monitored_power_ups. */
-function nut_mc_local_ups($system, $anyPort = false) {
+/* The addresses of the generated LISTEN lines, in file order (all on port 3493). */
+function nut_mc_listen(array $c) {
+    return $c['MODE'] === 'netserver' ? preg_split('/\s+/', trim($c['LISTEN'])) : ['127.0.0.1'];
+}
+
+/* The loopback families (4, 6) the generated upsd certainly listens on, as rc.nut's monitored_power_ups counts them: only
+ * what holds for current NUT and the legacy 2.7.4 alike. 0.0.0.0 and 127.0.0.1 are IPv4, ::1 is IPv6, and :: is IPv6 only if
+ * no other address follows it (2.7.4 binds the lines last to first, the bind of :: fails after another socket of the port)
+ * and never IPv4 (current NUT asks for IPv6-only sockets, 2.7.4 on Linux does not). Slave mode runs no upsd. */
+function nut_mc_listen_families(array $c) {
+    $families = [];
+    $any6 = null;
+    $other = -1;
+    foreach ($c['MODE'] === 'slave' ? [] : nut_mc_listen($c) as $i => $address) {
+        $ip = @inet_pton($address);
+        if ($ip === str_repeat("\0", 15) . "\1") {
+            $families[6] = true;
+        } elseif ($ip === str_repeat("\0", 16)) {
+            $any6 = $i;
+        } else {
+            $other = $i;
+            if ($ip === "\x7f\0\0\1" || $ip === "\0\0\0\0") $families[4] = true;
+        }
+    }
+    if ($any6 !== null && $any6 > $other) $families[6] = true;
+    return $families;
+}
+
+/* UPS name of a MONITOR system ("name@host[:port]") that looks like this machine's loopback, null for any other system.
+ * With $families (nut_mc_listen_families), only a system that certainly reaches the generated upsd counts, as in rc.nut's
+ * monitored_power_ups: port 3493 and every family its host can resolve to listened on. 127.0.0.1 and [::ffff:127.0.0.1]
+ * need IPv4, [::1] needs IPv6, localhost may be either and needs both; a bare ::1 is rejected by upsmon. Without $families
+ * any loopback spelling on any port counts, which only tells the lines of another UPS apart. */
+function nut_mc_local_ups($system, ?array $families = null) {
     [$name, $host] = array_pad(explode('@', (string)$system, 2), 2, '');
-    if (!preg_match('/^(?:(?:127\.0\.0\.1|localhost|\[::1\])(?::([0-9]+))?|::1)$/i', $host, $m)) return null;
-    return $anyPort || !isset($m[1]) || (int)$m[1] === 3493 ? $name : null;
+    if ($families === null) return preg_match('/^(?:(?:127\.0\.0\.1|localhost|\[::1\])(?::[0-9]+)?|::1)$/i', $host) ? $name : null;
+    if (!preg_match('/^(?:(127\.0\.0\.1|localhost)|\[([0-9a-f:.]+)\])(?::([0-9]+))?$/i', $host, $m) || (int)($m[3] ?? 3493) !== 3493) return null;
+    $ip = $m[1] === '' ? @inet_pton($m[2]) : false;
+    if (strtolower($m[1]) === 'localhost') $need = [4, 6];
+    elseif ($m[1] !== '' || $ip === "\x7f\0\0\1" || $ip === str_repeat("\0", 10) . "\xff\xff\x7f\0\0\1") $need = [4];
+    elseif ($ip === str_repeat("\0", 15) . "\1") $need = [6];
+    else return null;
+    return array_diff($need, array_keys($families)) ? null : $name;
 }
 
 function nut_mc_generate(array $c, $withCustom = true) {
@@ -223,8 +259,7 @@ function nut_mc_generate(array $c, $withCustom = true) {
         if ($c['DEBLEVEL'] !== 'default') $ups .= "\tdebug_min = {$c['DEBLEVEL']}\n";
         $files['ups.conf'] .= $ups . $block('CUSTOM_UPS');
 
-        $listen = $c['MODE'] === 'netserver' ? preg_split('/\s+/', trim($c['LISTEN'])) : ['127.0.0.1'];
-        foreach ($listen as $address) {
+        foreach (nut_mc_listen($c) as $address) {
             $files['upsd.conf'] .= "LISTEN $address\n";
         }
         $files['upsd.conf'] .= $block('CUSTOM_UPSD');
@@ -245,9 +280,10 @@ function nut_mc_generate(array $c, $withCustom = true) {
     // directives the custom field replaces (see NUT_MC_UPSMON_TIMERS), and the local UPSes whose MONITOR line it holds
     $own = [];
     $ownUps = [];
+    $families = nut_mc_listen_families($c);
     foreach (nut_mc_parse($withCustom ? nut_mc_custom($c, 'CUSTOM_UPSMON') : '') as $d) {
         $own[nut_mc_key('upsmon.conf', $d['words'])] = true;
-        if (!$d['error'] && strtoupper($d['words'][0] ?? '') === 'MONITOR' && ($name = nut_mc_local_ups($d['words'][1] ?? '')) !== null) $ownUps[$name] = true;
+        if (!$d['error'] && ($d['words'][0] ?? '') === 'MONITOR' && count($d['words']) >= 6 && ($name = nut_mc_local_ups($d['words'][1], $families)) !== null) $ownUps[$name] = true;
     }
     // The additional UPSes are only watched: power value 0 keeps them out of the shutdown decision, and slave keeps
     // upsmon from raising FSD on them (and on the clients attached to them) when this system shuts down.
@@ -620,7 +656,7 @@ function nut_mc_import(array $cfg, array $files) {
             $custom['CUSTOM_UPS'] = array_merge($own, ...array_values($others));
             $set('ups', $found);
             if ($others && $c['NAME'] !== $wanted) {
-                $notes[] = "ups.conf: the UPS \"$wanted\" of the settings has no section, \"{$c['NAME']}\" (the first section) is now the UPS that shuts this system down. Change the UPS Name setting to use another one.";
+                $notes[] = "ups.conf: the UPS \"$wanted\" of the settings has no section, \"{$c['NAME']}\" (the first section) is now the configured primary UPS. Change the UPS Name setting to use another one.";
             }
         }
     }
@@ -630,7 +666,7 @@ function nut_mc_import(array $cfg, array $files) {
     foreach ($entries as $d) {
         if ($d['error'] || count($d['words']) !== 6 || strtoupper($d['words'][0]) !== 'MONITOR') continue;
         // the line of another UPS of ups.conf (on any port) is not the shutdown UPS's: it stays a custom directive, credentials included
-        if (($local = nut_mc_local_ups($d['words'][1], true)) !== null && isset($others[$local])) continue;
+        if (($local = nut_mc_local_ups($d['words'][1])) !== null && isset($others[$local])) continue;
         $monitor = $monitor ?? $d;
         if (explode('@', $d['words'][1])[0] === $c['NAME']) {
             $monitor = $d;
@@ -773,18 +809,18 @@ function nut_mc_import(array $cfg, array $files) {
     if ($others) {
         $monitored = []; // other UPS => power values of its MONITOR lines, kept in the custom directives
         $replaced = [];  // the other UPSes whose kept MONITOR line replaces the generated one (see nut_mc_generate)
+        $families = nut_mc_listen_families($c);
         foreach (nut_mc_parse(implode("\n", $custom['CUSTOM_UPSMON'])) as $d) {
             $system = $d['words'][1] ?? '';
-            $name = !$d['error'] && strtoupper($d['words'][0] ?? '') === 'MONITOR' ? nut_mc_local_ups($system, true) : null;
+            $name = !$d['error'] && ($d['words'][0] ?? '') === 'MONITOR' && count($d['words']) >= 6 ? nut_mc_local_ups($system) : null;
             if ($name === null || !isset($others[$name])) continue;
             $monitored[$name][] = $d['words'][2] ?? '';
-            if (nut_mc_local_ups($system) !== null) $replaced[$name] = true;
+            if (nut_mc_local_ups($system, $families) !== null) $replaced[$name] = true;
         }
         $notes[] = 'ups.conf: more than one UPS section was found. The other sections, [' . implode('], [', array_keys($others))
-            . "], were kept in the ups.conf (UPS section) custom directives; \"{$c['NAME']}\" is the UPS that shuts this system down.";
+            . "], were kept in the ups.conf (UPS section) custom directives; \"{$c['NAME']}\" is the configured primary UPS.";
         if ($watched = array_diff(array_keys($others), array_keys($replaced))) {
-            $notes[] = 'upsmon.conf: [' . implode('], [', $watched) . '] ' . (count($watched) > 1 ? 'are' : 'is')
-                . ' now only watched: the generated MONITOR line has power value 0, so no shutdown starts from it. A MONITOR line in the upsmon.conf custom directives replaces it.';
+            $notes[] = 'upsmon.conf: a generated watch-only MONITOR with power value 0 was added for [' . implode('], [', $watched) . ']. Existing custom MONITOR lines remain in the configuration and may affect shutdown. A custom line replaces the generated monitor only if it certainly reaches the generated upsd (port 3493 and 127.0.0.1, or [::1] when upsd listens on ::1; localhost needs both IPv4 and IPv6).';
         }
         foreach ($monitored as $name => $powers) {
             foreach ($powers as $power) {

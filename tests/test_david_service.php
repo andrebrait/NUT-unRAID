@@ -393,7 +393,8 @@ $statsCfg("STATSOVERRIDE=\"enable\"\nSTATSCHART1VAR=\"../outside/secret\"\nSTATS
 check(strpos($out, 'did not pass, using defaults') !== false, 'nutstats rejects variable names that are file paths: ' . $out);
 check(json_decode(file_get_contents("$tmp/outside/secret.json"), true) === ['data' => []], 'nutstats never writes outside its own folder');
 
-// plugin upgrade: the restart safety net recovers a failed upgrade and cannot restart a NUT the user stopped after a completed one
+// plugin upgrade: the restart safety net recovers a failed upgrade, stays armed until NUT monitors again and cannot restart
+// a NUT the user stopped after a completed one. The install steps of the .plg run in a sandbox against stubs.
 $plgDoc = new DOMDocument();
 $plgDoc->load(__DIR__ . '/../plugin/nut3.plg', LIBXML_NOENT);
 $installScripts = [];
@@ -401,42 +402,250 @@ foreach ($plgDoc->getElementsByTagName('FILE') as $file) {
     $inline = $file->getElementsByTagName('INLINE')->item(0);
     if ($inline && !$file->hasAttribute('Method')) $installScripts[] = $inline->textContent;
 }
-$sandbox = fn($script) => str_replace(['/etc/rc.d/', '/var/run/', '/boot/config/plugins/'], ["$tmp/rc.d/", "$tmp/run/", "$tmp/boot/plugins/"], $script);
+$sandbox = fn($script) => str_replace(['/etc/rc.d/', '/var/run/', '/boot/config/plugins/', '/usr/local/emhttp/plugins/'],
+    ["$tmp/rc.d/", "$tmp/run/", "$tmp/boot/plugins/", "$tmp/emhttp/plugins/"], $script);
 $preUpgrade = $sandbox(reset($installScripts)); // the first install step stops NUT and schedules the safety net
-$postUpgrade = $sandbox(end($installScripts)); // the last install step runs once the upgrade completed
+$installSteps = array_values(array_filter($installScripts, fn($s) => strpos($s, 'Determining if NUT services should be started') !== false));
+check(count($installSteps) === 1, 'the .plg has one install step that starts NUT');
+$postUpgrade = $sandbox($installSteps[0] ?? ''); // the install step that runs once the new packages are in place
+foreach ([$preUpgrade, $postUpgrade] as $script) {
+    if (preg_match('#(?<![\w.-])/(boot|var/run|etc/rc\.d|usr/local/emhttp)/#', $script)) {
+        throw new RuntimeException('an install step still names a real system path, refusing to run it');
+    }
+}
 $binu = "$tmp/binu";
-foreach ([$binu, "$tmp/rc.d", "$tmp/run", "$tmp/boot/plugins"] as $dir) mkdir($dir, 0700, true);
+foreach ([$binu, "$tmp/rc.d", "$tmp/run", "$tmp/boot/plugins/nut3"] as $dir) mkdir($dir, 0700, true);
 stub("$binu/pgrep", '[ -f "$STUB/upsmon.running" ]');
 stub("$binu/killall", 'exit 0');
-stub("$binu/at", 'n=$(ls "$STUB"/at.job.* 2>/dev/null | wc -l); cat > "$STUB/at.job.$n"');
-foreach (['rc.nut', 'rc.nutstats'] as $name) {
-    stub("$tmp/rc.d/$name", 'echo "$(basename "$0") $1" >> "$STUB/rc.calls"; case "$1" in stop) rm -f "$STUB/upsmon.running";; start) touch "$STUB/upsmon.running";; esac');
-}
-/* Runs the install steps for each [NUT was running, upgrade completed] attempt, then lets the scheduled jobs fire with
- * NUT running or not; returns [scheduled jobs, rc.nut starts by those jobs]. */
-$upgrade = function (array $attempts, bool $runningAfter) use ($tmp, $binu, $bin, $preUpgrade, $postUpgrade) {
-    foreach (glob("$tmp/{run/*,at.job.*,rc.calls,upsmon.running}", GLOB_BRACE) as $f) unlink($f);
-    $env = ['PATH' => "$binu:$bin:" . getenv('PATH')];
-    foreach ($attempts as [$wasRunning, $completed]) {
-        $wasRunning ? touch("$tmp/upsmon.running") : @unlink("$tmp/upsmon.running");
-        run_bash($preUpgrade, $env);
-        if ($completed) run_bash($postUpgrade, $env);
-    }
-    $runningAfter ? touch("$tmp/upsmon.running") : @unlink("$tmp/upsmon.running");
-    @unlink("$tmp/rc.calls");
-    run_bash('for j in "$STUB"/at.job.*; do [ -f "$j" ] && sh "$j"; done', $env);
-    return [count(glob("$tmp/at.job.*")), substr_count(stub_read('rc.calls'), 'rc.nut start')];
+stub("$binu/chmod", 'exit 0'); // the install step relaxes the permissions of system directories
+// "at.fail" lists the kinds of job ("delayed": the safety net, "now": a background start) that cannot be scheduled
+stub("$binu/at", <<<'SH'
+kind=now; case "$*" in *+*) kind=delayed;; esac
+if grep -qx "$kind" "$STUB/at.fail" 2>/dev/null; then echo "at: cannot schedule the job" >&2; exit 1; fi
+n=0; [ -f "$STUB/at.n" ] && read -r n < "$STUB/at.n"
+echo $((n + 1)) > "$STUB/at.n"
+cat > "$STUB/at.job.$n"; echo "$kind" > "$STUB/at.kind.$n"
+SH);
+// "rc.start.mode": what "rc.nut start" does: ok (default), fail (exits 1, starts nothing) or ghost (exits 0, starts nothing)
+stub("$tmp/rc.d/rc.nut", <<<'SH'
+echo "$(basename "$0") $1" >> "$STUB/rc.calls"
+case "$1" in
+    stop) rm -f "$STUB/upsmon.running" ;;
+    start)
+        case "$(cat "$STUB/rc.start.mode" 2>/dev/null)" in
+            fail) echo "NUT failed to start"; exit 1 ;;
+            ghost) ;;
+            *) touch "$STUB/upsmon.running" ;;
+        esac ;;
+esac
+SH);
+stub("$tmp/rc.d/rc.nutstats", 'echo "$(basename "$0") $1" >> "$STUB/rc.calls"');
+
+$upEnv = ['PATH' => "$binu:$bin:" . getenv('PATH')];
+/* A fresh upgrade scenario: the settings of the plugin, NUT stopped, nothing scheduled, nothing started. */
+$begin = function (array $settings = ['SERVICE' => 'enable']) use ($tmp) {
+    foreach (glob("$tmp/{run/*,at.*,rc.calls,rc.start.mode,upsmon.running,boot/plugins/nut3/nut3.cfg}", GLOB_BRACE) as $f) unlink($f);
+    file_put_contents("$tmp/boot/plugins/nut3/nut3.cfg", implode('', array_map(fn($k, $v) => "$k=\"$v\"\n", array_keys($settings), $settings)));
 };
-[$jobs, $starts] = $upgrade([[true, false]], false);
-check($jobs === 1 && $starts === 1, "a failed upgrade restarts the NUT that was running ($jobs jobs, $starts starts)");
-[$jobs, $starts] = $upgrade([[true, true]], false);
-check($jobs === 1 && $starts === 0, "a completed upgrade cancels the restart when the user stopped NUT afterwards ($jobs jobs, $starts starts)");
-[$jobs, $starts] = $upgrade([[true, false]], true);
-check($jobs === 1 && $starts === 0, "a failed upgrade does not restart a NUT that is running again ($jobs jobs, $starts starts)");
-[$jobs, $starts] = $upgrade([[false, false]], false);
-check($jobs === 0 && $starts === 0, "an upgrade never starts a NUT that was not running ($jobs jobs, $starts starts)");
-[$jobs, $starts] = $upgrade([[true, false], [true, true]], false);
-check($jobs === 2 && $starts === 0, "a completed retry cancels the restart of the failed attempt too ($jobs jobs, $starts starts)");
+$running = fn(bool $on) => $on ? touch("$tmp/upsmon.running") : @unlink("$tmp/upsmon.running");
+$isRunning = fn() => is_file("$tmp/upsmon.running");
+$startMode = fn(string $mode) => file_put_contents("$tmp/rc.start.mode", $mode);
+$pre = fn() => run_bash($preUpgrade, $upEnv)[1];      // the step before the upgrade; returns its output
+$install = fn() => run_bash($postUpgrade, $upEnv)[1]; // the step after it
+$markers = fn() => count(glob("$tmp/run/nut3-upgrade-restart.*"));
+$scheduled = fn(string $kind) => count(array_filter(glob("$tmp/at.kind.*"), fn($f) => trim(file_get_contents($f)) === $kind));
+$starts = fn() => substr_count(stub_read('rc.calls'), 'rc.nut start');
+/* Lets the scheduled jobs of one kind fire (once each, in the order they were scheduled), in sh like atd would run them;
+ * returns how many times they started NUT. */
+$fire = function (string $kind) use ($tmp, $upEnv, $starts) {
+    $before = $starts();
+    foreach (glob("$tmp/at.job.*") as $job) {
+        if (trim(file_get_contents(str_replace('at.job.', 'at.kind.', $job))) !== $kind) continue;
+        run_bash('sh "$1"', $upEnv, [$job]);
+        rename($job, str_replace('at.job.', 'at.done.', $job));
+    }
+    return $starts() - $before;
+};
+
+// a failed upgrade: nothing runs after the first step, so the safety net restarts the NUT that was running
+$begin();
+$running(true);
+$out = $pre();
+check(!$isRunning() && $markers() === 1 && $scheduled('delayed') === 1, "the first step stops NUT and arms one safety net ({$markers()} markers, {$scheduled('delayed')} jobs): $out");
+check($fire('delayed') === 1 && $isRunning() && $markers() === 0, 'a failed upgrade restarts the NUT that was running once the net fires');
+$begin();
+$running(true);
+$pre();
+$running(true); // the user started NUT again
+check($fire('delayed') === 0 && $markers() === 0, 'the net does not start a NUT that is running again');
+
+// NUT that was not running is not given a safety net, and only the settings decide whether the install step starts it
+$begin(['SERVICE' => 'disable']);
+$pre();
+$out = $install();
+check($markers() === 0 && $scheduled('delayed') === 0 && $starts() === 0 && !$isRunning(), "disabled and stopped NUT stays stopped without any job ($out)");
+$begin();
+$pre();
+$install();
+check($markers() === 0 && $scheduled('delayed') === 0 && $starts() === 1 && $isRunning(), 'an enabled NUT that was not running is started by the install step alone');
+
+// a completed upgrade whose start succeeded cancels the net, so a NUT the user stops afterwards stays stopped
+$begin();
+$running(true);
+$pre();
+$out = $install();
+check($starts() === 1 && $isRunning() && $markers() === 0 && strpos($out, 'started successfully') !== false, "a successful start cancels the safety net: $out");
+$running(false);
+check($fire('delayed') === 0 && !$isRunning(), 'the net does not restart a NUT the user stopped after a completed upgrade');
+
+// a start that fails (or exits 0 without upsmon running) keeps the net armed, so the NUT that was running comes back
+foreach (['fail', 'ghost'] as $mode) {
+    $begin();
+    $running(true);
+    $pre();
+    $startMode($mode);
+    $out = $install();
+    check($markers() === 1 && !$isRunning() && strpos($out, 'failed to start') !== false && strpos($out, 'started again') !== false, "a '$mode' start keeps the safety net armed and says so ({$markers()} markers): $out");
+    $startMode('ok');
+    check($fire('delayed') === 1 && $isRunning() && $markers() === 0, "the net restarts NUT after a '$mode' start");
+    $begin();
+    $running(true);
+    $pre();
+    $startMode($mode);
+    $install();
+    $running(true); // the user fixed it and started NUT before the net fires
+    check($fire('delayed') === 0 && $markers() === 0, "the net leaves a NUT alone that the user started after a '$mode' start");
+}
+
+// Disabling NUT while a failed upgrade's recovery is pending must prevent a later automatic start.
+$begin();
+$running(true);
+$pre();
+$startMode('fail');
+$install();
+file_put_contents("$tmp/boot/plugins/nut3/nut3.cfg", "SERVICE=\"disable\"\n");
+$startMode('ok');
+check($fire('delayed') === 0 && !$isRunning(), 'the recovery job respects a service disabled after a failed upgrade');
+
+// the SNMP driver starts NUT in the background: the net stays armed until that job really started it
+$snmp = ['SERVICE' => 'enable', 'DRIVER' => 'snmp-ups'];
+$begin($snmp);
+$running(true);
+$pre();
+$out = $install();
+check($scheduled('now') === 1 && $starts() === 0 && $markers() === 1, "the background start is only scheduled and the net stays armed ({$markers()} markers, {$starts()} starts): $out");
+check($fire('now') === 1 && $isRunning() && $markers() === 0, 'a background start that succeeds cancels the net');
+$running(false);
+check($fire('delayed') === 0 && !$isRunning(), 'the net does not restart a NUT the user stopped after a successful background start');
+$begin($snmp);
+$running(true);
+$pre();
+$install();
+file_put_contents("$tmp/boot/plugins/nut3/nut3.cfg", "SERVICE=\"disable\"\nDRIVER=\"snmp-ups\"\n");
+check($fire('now') === 0 && !$isRunning(), 'a deferred SNMP start respects a service disabled before the job runs');
+check($fire('delayed') === 0 && !$isRunning(), 'the later safety check also respects the disabled service');
+foreach (['fail', 'ghost'] as $mode) {
+    $begin($snmp);
+    $running(true);
+    $pre();
+    $install();
+    $startMode($mode);
+    check($fire('now') === 1 && !$isRunning() && $markers() === 1, "a '$mode' background start keeps the net armed ({$markers()} markers)");
+    $startMode('ok');
+    check($fire('delayed') === 1 && $isRunning() && $markers() === 0, "the net restarts NUT after a '$mode' background start");
+}
+$begin(['SERVICE' => 'enable', 'DRIVER' => 'snmp-ups', 'MODE' => 'slave']);
+$running(true);
+$pre();
+$out = $install();
+check($scheduled('now') === 0 && $starts() === 1 && $markers() === 0, "an SNMP driver in slave mode starts NUT right away like any other: $out");
+
+// the safety net cannot be scheduled: no marker is left behind and the user is told
+$begin();
+file_put_contents("$tmp/at.fail", "delayed\n");
+$running(true);
+$out = $pre();
+check($markers() === 0 && $scheduled('delayed') === 0 && strpos($out, 'safety check could not be scheduled') !== false, "an unschedulable net leaves no marker and warns ({$markers()} markers): $out");
+$out = $install();
+check($starts() === 1 && $isRunning() && $markers() === 0, 'the install step still starts NUT when no net could be scheduled');
+
+// the background start cannot be scheduled: NUT is started right away instead, and the net follows that start
+$begin($snmp);
+file_put_contents("$tmp/at.fail", "now\n");
+$running(true);
+$pre();
+$out = $install();
+check($scheduled('now') === 0 && $starts() === 1 && $isRunning() && $markers() === 0 && strpos($out, 'background start could not be scheduled') !== false, "an unschedulable background start falls back to a start now ({$starts()} starts, {$markers()} markers): $out");
+$begin($snmp);
+file_put_contents("$tmp/at.fail", "now\n");
+$running(true);
+$pre();
+$startMode('fail');
+$install();
+check($starts() === 1 && $markers() === 1, 'a failed fallback start keeps the net armed');
+$startMode('ok');
+check($fire('delayed') === 1 && $isRunning(), 'the net restarts NUT after a failed fallback start');
+
+// retries: the net of a failed attempt stays armed while the retry does not run NUT, and the retry that does cancels it
+$failedAttempt = function (array $settings) use ($begin, $running, $pre) {
+    $begin($settings);
+    $running(true);
+    $pre(); // attempt 1 stopped NUT and never got further
+};
+$failedAttempt(['SERVICE' => 'enable']);
+$pre(); // attempt 2 finds NUT stopped and arms nothing of its own
+check($markers() === 1 && $scheduled('delayed') === 1, "a retry after a failed attempt arms no second net ({$markers()} markers)");
+$install();
+check($markers() === 0 && $isRunning(), 'a retry that starts NUT cancels the net of the failed attempt');
+check($fire('delayed') === 0, 'the cancelled net of the failed attempt starts nothing');
+$failedAttempt(['SERVICE' => 'enable']);
+$pre();
+$startMode('fail');
+$install();
+check($markers() === 1, 'a retry whose start fails leaves the net of the failed attempt armed');
+$startMode('ok');
+check($fire('delayed') === 1 && $isRunning(), 'the net of the failed attempt restarts NUT after the failed retry');
+$failedAttempt($snmp);
+$pre();
+$install();
+check($markers() === 1 && $fire('now') === 1 && $markers() === 0, 'a background start that succeeds cancels the net of the failed attempt as well');
+$running(false);
+check($fire('delayed') === 0 && !$isRunning(), 'the net of the failed attempt does not restart a NUT the user stopped afterwards');
+$failedAttempt($snmp);
+$pre();
+$install();
+$startMode('fail');
+check($fire('now') === 1 && $markers() === 1, 'a background start that fails leaves the net of the failed attempt armed');
+$startMode('ok');
+check($fire('delayed') === 1 && $isRunning(), 'the net of the failed attempt restarts NUT after the failed background start');
+// both attempts armed a net (the user started NUT between them): a start that succeeds cancels both
+$failedAttempt(['SERVICE' => 'enable']);
+$running(true);
+$pre();
+check($markers() === 2 && $scheduled('delayed') === 2, "two attempts arm two nets ({$markers()} markers)");
+$install();
+$running(false);
+check($markers() === 0 && $fire('delayed') === 0, 'a completed retry cancels the nets of both attempts');
+$failedAttempt(['SERVICE' => 'enable']);
+$running(true);
+$pre();
+$startMode('fail');
+$install();
+$startMode('ok');
+check($markers() === 2 && $fire('delayed') === 1 && $isRunning() && $markers() === 0, 'with two nets armed, one restarts NUT and the other finds it running');
+
+// settings that do not want NUT keep it stopped: there is nothing to restart, and statistics alone are not NUT monitoring
+$begin(['SERVICE' => 'disable']);
+$running(true);
+$pre();
+$out = $install();
+check($markers() === 0 && $starts() === 0 && strpos($out, 'Starting NUT services') === false, "a disabled service is not started by the install step ($out)");
+check($fire('delayed') === 0 && !$isRunning(), 'the net does not start a NUT whose service is disabled');
+$begin(['SERVICE' => 'disable', 'STATISTICS' => 'enable']);
+$running(true);
+$pre();
+$install();
+check($markers() === 0 && $starts() === 0 && strpos(stub_read('rc.calls'), 'rc.nutstats check') !== false, 'statistics alone are started without NUT and cancel the net');
 
 // rc.nutstats: the settings copy of the statistics (it holds the UPS passwords) is 0600, never replaces a looser file in place
 $ns = "$tmp/ns";

@@ -480,13 +480,30 @@ write_config() {
 }
 
 # UPS names to power off: the configured UPS plus every UPS that upsmon.conf monitors with a power value above 0 on this
-# system (legacy redundant setups, any role): a loopback host on a port the local upsd listens on. That is the port of a
-# loopback or wildcard LISTEN line of the upsd.conf in use (3493 without a port, and without any LISTEN line), so a monitor of
-# another daemon on the same host can never power off a local UPS of the same name; a LISTEN line that cannot be read adds
-# no port. UPSes with power value 0 are only watched and stay on, remote systems are not ours.
-# The word splitting follows NUT's parseconf (quotes, backslash escapes, # comments); malformed lines are skipped.
+# system's own upsd (legacy redundant setups, any role). A monitor counts only when the upsd.conf in use shows that upsd
+# listens on every address the monitor can reach: same address family, same port. Another daemon could hold the rest.
+# Current NUT sets IPV6_V6ONLY and knows "LISTEN *"; NUT 2.7.4 (the legacy backend) does neither and binds the LISTEN lines
+# last to first, a failed bind only being logged. Only what holds for both is credited:
+#   * IPv4, that is 127.0.0.1 and [::ffff:127.0.0.1] (reaches it): a LISTEN of 127.0.0.1 or 0.0.0.0 on its port.
+#   * IPv6, [::1]: a LISTEN of ::1, or of :: when no other LISTEN of its port follows it (2.7.4 binds it before those,
+#     afterwards the bind of :: fails). :: is never credited with IPv4 (2.7.4 on Linux accepts it there), "LISTEN *" (fatal
+#     on 2.7.4) and an IPv4-mapped LISTEN (not bindable with IPV6_V6ONLY) with nothing at all.
+#   * localhost may resolve to either family and the client keeps the first that answers, so it counts only when both
+#     families listen on its port. "LISTEN localhost" binds one address of a family nobody can tell: it covers nothing.
+#   * Without any LISTEN line upsd listens on 127.0.0.1 and ::1, port 3493 (and so without a port). A LISTEN line that is
+#     not understood, or an upsd.conf that cannot be read, adds no listener and the defaults are not assumed either.
+#   * Everything else belongs to another daemon: other hosts, other ports, bare "::1" (upsmon rejects it, brackets are
+#     required), ports outside 1-65535, LISTEN or MONITOR in another case (upsd and upsmon match them exactly).
+# UPSes with power value 0 are only watched and stay on. A loopback monitor with a power value that is skipped is logged,
+# unless it is the configured UPS, which is powered off anyway. The word splitting follows NUT's parseconf (quotes,
+# backslash escapes, # comments); malformed lines are skipped. The identity comes from the configuration, no socket is probed.
 monitored_power_ups() {
-    { cat /etc/nut/upsd.conf 2>/dev/null; printf '\n@@UPSMON@@\n'; cat /etc/nut/upsmon.conf 2>/dev/null; } | awk '
+    local upsd_conf=/etc/nut/upsd.conf
+    {
+        # no file: NUT's defaults. A file that cannot be read: the listeners are unknown
+        if [ -e "$upsd_conf" ] || [ -L "$upsd_conf" ]; then cat "$upsd_conf" 2>/dev/null || printf '\nLISTEN unreadable\n'; fi
+        printf '\n@@UPSMON@@\n'; cat /etc/nut/upsmon.conf 2>/dev/null
+    } | awk -v primary="$NAME" '
     function words(line,    i, ch, st, have, cur) {
         nw = 0; st = 0; have = 0
         for (i = 1; i <= length(line); i++) {
@@ -519,28 +536,92 @@ monitored_power_ups() {
         if (have) w[++nw] = cur
         return 1
     }
-    !part && $0 == "@@UPSMON@@" { if (!nlisten) lport[3493] = 1; part = 1; next }
+    function okport(p) { return p ~ /^[0-9]+$/ && p + 0 >= 1 && p + 0 <= 65535 }
+    # An IPv6 literal as eight hex groups without leading zeros in g[1..8] ("::" and a dotted-quad tail expanded); 0 if it is none.
+    function v6(a,    c, q, o, i, h, r, nh, nr, H, R) {
+        a = tolower(a)
+        if (a !~ /:/ || a !~ /^[0-9a-f:.]+$/ || a ~ /:::/) return 0
+        if (index(a, ".")) {
+            q = a; sub(/^.*:/, "", q)
+            if (split(q, o, ".") != 4) return 0
+            for (i = 1; i <= 4; i++) if (o[i] !~ /^(0|[1-9][0-9]*)$/ || o[i] + 0 > 255) return 0
+            a = substr(a, 1, length(a) - length(q)) sprintf("%x:%x", o[1] * 256 + o[2], o[3] * 256 + o[4])
+        }
+        c = index(a, "::")
+        if (c) {
+            h = substr(a, 1, c - 1); r = substr(a, c + 2)
+            if (index(r, "::")) return 0
+            nh = (h == "" ? 0 : split(h, H, ":")); nr = (r == "" ? 0 : split(r, R, ":"))
+            if (nh + nr > 7) return 0
+            for (i = 1; i <= 8; i++) g[i] = "0"
+            for (i = 1; i <= nh; i++) g[i] = H[i]
+            for (i = 1; i <= nr; i++) g[8 - nr + i] = R[i]
+        } else if (split(a, g, ":") != 8) return 0
+        for (i = 1; i <= 8; i++) {
+            if (g[i] !~ /^[0-9a-f][0-9a-f]?[0-9a-f]?[0-9a-f]?$/) return 0
+            sub(/^0+/, "", g[i]); if (g[i] == "") g[i] = "0"
+        }
+        return 1
+    }
+    # "any" for ::, "loop" for ::1, "m4" for ::ffff:127.0.0.1, "" for any other string
+    function v6kind(a,    i, s) {
+        if (!v6(a)) return ""
+        for (i = 1; i <= 8; i++) s = s g[i] ":"
+        if (s == "0:0:0:0:0:0:0:0:") return "any"
+        if (s == "0:0:0:0:0:0:0:1:") return "loop"
+        if (s == "0:0:0:0:0:ffff:7f00:1:") return "m4"
+        return ""
+    }
+    # 1 when the host[:port] of a MONITOR system can only reach the upsd of this system; loopish: it is a loopback address
+    function ours(hp,    host, port, c, k) {
+        loopish = 0; hp = tolower(hp); port = 3493
+        if (hp ~ /^\[/) {
+            c = index(hp, "]")
+            if (!c) return 0
+            host = substr(hp, 2, c - 2)
+            if (c < length(hp)) { if (substr(hp, c + 1, 1) != ":") return 0; port = substr(hp, c + 2) }
+        } else if ((c = index(hp, ":"))) {
+            host = substr(hp, 1, c - 1); port = substr(hp, c + 1)
+        } else host = hp
+        if (!okport(port)) return 0
+        port += 0
+        if (host == "127.0.0.1") { loopish = 1; return (port in l4) }
+        if (host == "localhost") { loopish = 1; return (port in l4) && (port in l6) }
+        k = v6kind(host)
+        if (k == "loop") { loopish = 1; return (port in l6) }
+        if (k == "m4") { loopish = 1; return (port in l4) }
+        return 0
+    }
+    BEGIN { warn = "logger -t rc.nut" }
+    !part && $0 == "@@UPSMON@@" {
+        if (!nlisten) l4[3493] = l6[3493] = 1
+        for (p in any6) if (any6[p] > other[p]) l6[p] = 1
+        part = 1; next
+    }
     {
         if (!words($0)) next
         if (!part) {
-            if (toupper(w[1]) != "LISTEN") next
+            if (w[1] != "LISTEN") next
             nlisten++
-            if (nw < 2 || nw > 3 || (nw == 3 && w[3] !~ /^[0-9]+$/)) next
-            if (tolower(w[2]) ~ /^(127\.0\.0\.1|localhost|::1|0\.0\.0\.0|::)$/) lport[nw == 3 ? w[3] + 0 : 3493] = 1
+            if (nw < 2 || nw > 3) next
+            lp = (nw == 3 ? w[3] : 3493)
+            if (!okport(lp)) next
+            lp += 0; a = tolower(w[2]); k = v6kind(a)
+            if (a == "127.0.0.1" || a == "0.0.0.0") l4[lp] = 1
+            if (k == "loop") l6[lp] = 1
+            if (k == "any") any6[lp] = nlisten
+            if (k != "loop" && k != "any") other[lp] = nlisten
             next
         }
-        if (nw < 6 || toupper(w[1]) != "MONITOR") next
+        if (nw < 6 || w[1] != "MONITOR") next
         if (w[3] !~ /^[0-9]+$/ || w[3] + 0 == 0) next
         at = index(w[2], "@")
         if (at < 2) next
-        hp = tolower(substr(w[2], at + 1))
-        if (hp ~ /^\[::1\](:[0-9]+)?$/) sub(/^\[::1\]:?/, "", hp)
-        else if (hp ~ /^(127\.0\.0\.1|localhost)(:[0-9]+)?$/) sub(/^(127\.0\.0\.1|localhost):?/, "", hp)
-        else if (hp == "::1") hp = ""
-        else next
-        port = (hp == "" ? 3493 : hp + 0)
-        if (port in lport) print substr(w[2], 1, at - 1)
-    }'
+        nm = substr(w[2], 1, at - 1); sys = substr(w[2], at + 1)
+        if (ours(sys)) print nm
+        else if (loopish && nm != primary) print "WARNING: Not powering off UPS [" nm "]: its MONITOR system [" sys "] has power value " w[3] ", but upsd.conf does not show that this loopback address and port reach the local upsd (IPv4 and IPv6 are separate, localhost needs both). Use 127.0.0.1 or [::1] together with a matching LISTEN line." | warn
+    }
+    END { close(warn) }'
 }
 
 # power off the UPS inverters; each name goes to upsdrvctl on its own, never an empty one (that would mean every driver)

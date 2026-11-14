@@ -606,8 +606,8 @@ file_put_contents("$sb/etc/nut/upsmon.conf", <<<'CONF'
 MONITOR primary@localhost 1 monuser "p w" master
 MONITOR "second@[::1]:3493" 1 monuser pw secondary   # quoted system, IPv6 with port
 MONITOR third@127.0.0.1:3493 2 monuser pw "slave"
-MONITOR fourth@::1 1 monuser pw primary
-monitor fifth@LocalHost 1 monuser pw slave
+MONITOR fourth@[::1] 1 monuser pw primary
+MONITOR fifth@LocalHost 1 monuser pw slave
 MONITOR watcher@localhost 0 monuser pw slave
 MONITOR remote@192.168.1.5 1 monuser pw master
 MONITOR lookalike@localhost.example.com 1 monuser pw master
@@ -616,6 +616,8 @@ MONITOR short@localhost 1 monuser pw
 MONITOR badpower@localhost many monuser pw master
 MONITOR broken@localhost 1 monuser "pw master
 MONITOR @localhost 1 monuser pw master
+monitor lowercase@localhost 1 monuser pw master   # upsmon matches directives exactly, it ignores this line
+MONITOR bare6@::1 1 monuser pw master             # upsmon cannot split an IPv6 host without brackets
 #MONITOR commented@localhost 1 monuser pw master
 NOTIFYFLAG ONBATT SYSLOG+EXEC
 CONF);
@@ -645,36 +647,114 @@ file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR ups@localhost 1 monuser mo
 [$code] = rc($sb, 'shutdown');
 check($code === 0 && events($sb) === ['drvctl-shutdown ups', 'drvctl-shutdown backup'], 'a pending import powers off the legacy monitors, not the watcher: ' . implode(' | ', events($sb)));
 
-// a monitor on another port is another upsd: its UPS only counts when the local upsd listens there (3493 by default),
-// so a same-named local UPS on 3493 is never powered off for it. The upsd.conf in use decides, also while an import is pending.
+// A monitor reaches this system's upsd only when the upsd.conf in use listens on its address family AND port: a LISTEN of
+// ::1 says nothing about 127.0.0.1:3493, which may be another daemon's, whose UPS can share a name with a local one.
+// Every name below is a monitor of one kind, the table names those a given upsd.conf makes certain to be local, for the
+// current NUT and the legacy 2.7.4 alike: upsd.conf in use decides, also while an import is pending; :: is never IPv4
+// (current NUT asks for IPv6-only sockets, 2.7.4 on Linux does not) and counts as IPv6 only if no other LISTEN of its port
+// follows it (2.7.4 binds the lines last to first and the bind of :: fails after another socket of that port); "LISTEN *"
+// is fatal on 2.7.4 and an IPv4-mapped LISTEN is not bindable on current NUT, so both count as nothing; "localhost" may
+// be either family (it needs both); a LAN address or another host is never ours; a directive in another case is no
+// directive for upsd and upsmon. Every skipped loopback monitor with a power value is logged.
 $sb = sb_new('killpower-ports');
 sb_cfg($sb, ['NAME' => 'primary']);
 touch("$sb/etc/nut/killpower");
 file_put_contents("$sb/etc/nut/upsmon.conf", <<<'CONF'
-MONITOR spare@127.0.0.1:3494 1 monuser pw master
-MONITOR same@localhost:3493 1 monuser pw master
-MONITOR other@[::1]:3495 1 monuser pw master
-MONITOR plain@::1 1 monuser pw master
-MONITOR remote@192.168.1.5:3493 1 monuser pw master
+MONITOR v4@127.0.0.1:3493 1 monuser pw master
+MONITOR v6@[::1] 1 monuser pw master
+MONITOR name@localhost 1 monuser pw master
+MONITOR mapped@[::ffff:127.0.0.1]:3493 1 monuser pw master
+MONITOR v4p@127.0.0.1:3494 1 monuser pw master
+MONITOR v6p@[::1]:3494 1 monuser pw master
+MONITOR namep@LocalHost:3494 1 monuser pw master
+MONITOR mappedp@[0:0:0:0:0:ffff:7f00:1]:3494 1 monuser pw master
+MONITOR badzero@127.0.0.1:0 1 monuser pw master
+MONITOR badlarge@127.0.0.1:65536 1 monuser pw master
+MONITOR bare6@::1 1 monuser pw master
+MONITOR watch@127.0.0.1 0 monuser pw slave
+MONITOR lan@192.168.1.5 1 monuser pw master
+MONITOR lanp@192.168.1.2:3494 1 monuser pw master
+MONITOR lan6@[2001:db8::5] 1 monuser pw master
+MONITOR lanmapped@[::ffff:192.168.1.5]:3493 1 monuser pw master
 CONF);
-$primary = 'drvctl-shutdown primary';
+$order = ['v4', 'v6', 'name', 'mapped', 'v4p', 'v6p', 'namep', 'mappedp'];
+$default = ['v4', 'v6', 'name', 'mapped']; // port 3493 on both loopbacks
 $listen = [
-    'no upsd.conf' => [null, [$primary, 'drvctl-shutdown same', 'drvctl-shutdown plain']],
-    'no LISTEN line' => ["MAXAGE 15\n", [$primary, 'drvctl-shutdown same', 'drvctl-shutdown plain']],
-    'LISTEN without a port' => ["LISTEN ::\n", [$primary, 'drvctl-shutdown same', 'drvctl-shutdown plain']],
-    'a custom loopback port' => ["LISTEN 127.0.0.1 3494\nLISTEN 192.168.1.2\n", [$primary, 'drvctl-shutdown spare']],
-    'a custom port, any case and comments' => ["# listeners\nLISTEN LocalHost 3494 # local\n", [$primary, 'drvctl-shutdown spare']],
-    'wildcards on two ports' => ["LISTEN 0.0.0.0 3493\nLISTEN :: 3495\n", [$primary, 'drvctl-shutdown same', 'drvctl-shutdown other', 'drvctl-shutdown plain']],
-    'LAN address only' => ["LISTEN 192.168.1.2 3494\n", [$primary]],
-    'port that is not a number' => ["LISTEN 127.0.0.1 abc\n", [$primary]],
-    'line with extra words' => ["LISTEN 127.0.0.1 3494 extra\n", [$primary]],
+    'no upsd.conf' => [null, $default],
+    'no LISTEN line' => ["MAXAGE 15\n", $default],
+    'a lowercase listen is no directive, the defaults stay' => ["listen 127.0.0.1 3494\n", $default],
+    'the generated standalone config' => ["LISTEN 127.0.0.1\n", ['v4', 'mapped']],
+    'LISTEN ::1 is not 127.0.0.1' => ["LISTEN ::1 3493\n", ['v6']],
+    'LISTEN :: is IPv6 only' => ["LISTEN ::\n", ['v6']],
+    'LISTEN 0.0.0.0 and a LAN address' => ["LISTEN 0.0.0.0\nLISTEN 192.168.1.2\n", ['v4', 'mapped']],
+    'IPv4 wildcard, then :: (bound first by 2.7.4)' => ["LISTEN 0.0.0.0\nLISTEN ::\n", $default],
+    ':: before the IPv4 wildcard (its bind fails on 2.7.4)' => ["LISTEN ::\nLISTEN 0.0.0.0\n", ['v4', 'mapped']],
+    'a LAN address, then ::' => ["LISTEN 192.168.1.2\nLISTEN ::\n", ['v6']],
+    ':: before a LAN address' => ["LISTEN ::\nLISTEN 192.168.1.2\n", []],
+    ':: and ::1' => ["LISTEN ::\nLISTEN ::1\n", ['v6']],
+    ':: on another port does not clash with the default port' => ["LISTEN :: 3494\nLISTEN 0.0.0.0\n", ['v4', 'mapped', 'v6p']],
+    'both loopbacks, comments and an explicit port' => ["LISTEN 127.0.0.1\nLISTEN ::1 3493 # IPv6\n", $default],
+    'LISTEN * is fatal on 2.7.4, it counts as nothing' => ["LISTEN * 3493\n", []],
+    'IPv4 wildcard and IPv6 loopback' => ["LISTEN 0.0.0.0\nLISTEN ::1\n", $default],
+    'LISTEN localhost binds one address of an unknown family' => ["LISTEN localhost\n", []],
+    'IPv6 loopback in full form' => ["LISTEN 0:0:0:0:0:0:0:0001\n", ['v6']],
+    'IPv6 wildcard in short form' => ["LISTEN 0::0\n", ['v6']],
+    'an IPv4-mapped address cannot be bound by an IPv6-only socket' => ["LISTEN ::ffff:127.0.0.1\n", []],
+    'LAN address only' => ["LISTEN 192.168.1.2\n", []],
+    'inline port syntax is not understood' => ["LISTEN 127.0.0.1:3494\n", []],
+    'both loopbacks on another port' => ["LISTEN 127.0.0.1 3494\nLISTEN ::1 3494\n", ['v4p', 'v6p', 'namep', 'mappedp']],
+    'IPv4 loopback on another port' => ["# listeners\nLISTEN 127.0.0.1 3494 # local\n", ['v4p', 'mappedp']],
+    'wildcards on another port' => ["LISTEN 0.0.0.0 3494\nLISTEN :: 3494\n", ['v4p', 'v6p', 'namep', 'mappedp']],
+    'one family per port' => ["LISTEN 0.0.0.0\nLISTEN ::1 3494\n", ['v4', 'mapped', 'v6p']],
+    'IPv6 on the default port, IPv4 on another' => ["LISTEN ::1\nLISTEN 127.0.0.1 3494\n", ['v6', 'v4p', 'mappedp']],
+    'port that is not a number' => ["LISTEN 127.0.0.1 abc\n", []],
+    'port zero' => ["LISTEN 127.0.0.1 0\n", []],
+    'port above 65535' => ["LISTEN 127.0.0.1 65536\n", []],
+    'line with extra words' => ["LISTEN 127.0.0.1 3494 extra\n", []],
+    'an upsd.conf that cannot be read' => [false, []],
 ];
-foreach ($listen as $case => [$upsd, $expected]) {
-    if ($upsd === null) @unlink("$sb/etc/nut/upsd.conf"); else file_put_contents("$sb/etc/nut/upsd.conf", $upsd);
+foreach ($listen as $case => [$upsd, $names]) {
+    $conf = "$sb/etc/nut/upsd.conf";
+    if (is_dir($conf)) rmdir($conf);
+    if ($upsd === false) { if (file_exists($conf)) unlink($conf); mkdir($conf); }
+    elseif ($upsd === null) @unlink($conf);
+    else file_put_contents($conf, $upsd);
     file_put_contents("$sb/events", '');
+    file_put_contents("$sb/log", '');
     [$code] = rc($sb, 'shutdown');
-    check($code === 0 && events($sb) === $expected, "$case: only the monitors of the local upsd are powered off: " . implode(' | ', events($sb)));
+    $expected = array_map(fn($name) => "drvctl-shutdown $name", array_merge(['primary'], array_values(array_intersect($order, $names))));
+    check($code === 0 && events($sb) === $expected, "$case: only monitors certain to reach the local upsd are powered off, expected " . implode(',', $expected) . ' got ' . implode(',', events($sb)));
+    // all eight loopback monitors carry a power value: each one that is not powered off is logged
+    check(log_count($sb, 'Not powering off UPS') === count($order) - count($names), "$case: every skipped loopback monitor is logged, got " . log_count($sb, 'Not powering off UPS'));
 }
+
+// the shipped legacy configurations through the real rc.nut: the family and port of the LISTEN lines decide for the
+// monitors that were added to their upsmon.conf (the legacy monitor of the UPS itself is the configured UPS)
+$extra = "\nMONITOR second@127.0.0.1 1 monuser pw slave\nMONITOR third@[::1] 1 monuser pw slave\nMONITOR fourth@localhost 1 monuser pw slave\n";
+$fixtures = ['legacy-default' => ['ups', ['second'], ['third', 'fourth']], 'legacy-custom' => ['rack', ['second', 'third', 'fourth'], []]];
+foreach ($fixtures as $fixture => [$name, $local, $skipped]) {
+    $sb = sb_new("killpower-$fixture");
+    sb_cfg($sb, ['NAME' => $name]);
+    touch("$sb/etc/nut/killpower");
+    foreach (['upsd.conf', 'upsmon.conf'] as $file) copy("$repo/tests/fixtures/$fixture/$file", "$sb/etc/nut/$file");
+    file_put_contents("$sb/etc/nut/upsmon.conf", $extra, FILE_APPEND);
+    [$code] = rc($sb, 'shutdown');
+    $expected = array_map(fn($ups) => "drvctl-shutdown $ups", array_merge([$name], $local));
+    check($code === 0 && events($sb) === $expected, "$fixture: powers off " . implode(',', $expected) . ' got ' . implode(',', events($sb)));
+    check(log_count($sb, 'Not powering off UPS') === count($skipped) && count(array_filter($skipped, fn($ups) => log_count($sb, "Not powering off UPS [$ups]") === 1)) === count($skipped),
+        "$fixture: the skipped monitors (" . implode(',', $skipped) . ') are logged, and only they: ' . read_file($sb, 'log'));
+}
+
+// a skipped loopback monitor is logged, but not the configured UPS (powered off anyway), a watcher or a remote system
+$sb = sb_new('killpower-warning');
+sb_cfg($sb, ['NAME' => 'primary']);
+touch("$sb/etc/nut/killpower");
+file_put_contents("$sb/etc/nut/upsd.conf", "LISTEN 127.0.0.1\n");
+file_put_contents("$sb/etc/nut/upsmon.conf", "MONITOR primary@localhost 1 monuser pw master\nMONITOR aux@localhost 1 monuser pw slave\nMONITOR watch@localhost 0 monuser pw slave\nMONITOR far@10.0.0.9 1 monuser pw slave\n");
+[$code] = rc($sb, 'shutdown');
+check($code === 0 && events($sb) === ['drvctl-shutdown primary'], 'an ambiguous localhost monitor does not power off its UPS: ' . implode(' | ', events($sb)));
+check(log_count($sb, 'Not powering off UPS') === 1 && log_count($sb, 'rc.nut: WARNING: Not powering off UPS [aux]: its MONITOR system [localhost] has power value 1') === 1,
+    'only the skipped localhost monitor of another UPS is logged: ' . read_file($sb, 'log'));
 
 $sb = sb_new('killpower-pending-port');
 sb_cfg($sb, ['NAME' => 'ups']);

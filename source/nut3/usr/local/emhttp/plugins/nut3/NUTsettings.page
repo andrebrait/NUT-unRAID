@@ -329,6 +329,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                 <p>The addresses NUT listens on for slave connections in <strong><em>Netserver</em></strong> mode, separated by spaces (port 3493).</p>
                 <p><strong><em>0.0.0.0</em></strong> listens on all IPv4 interfaces. When listing specific addresses, include <strong><em>127.0.0.1</em></strong> for the local NUT monitor.</p>
                 <p>In <strong><em>Standalone</em></strong> mode NUT only listens on <strong><em>127.0.0.1</em></strong>.</p>
+                <p>To let a monitor use <strong><em>[::1]</em></strong> or <strong><em>localhost</em></strong>, add <strong><em>::1</em></strong>, or <strong><em>::</em></strong> as the last address (it listens on IPv6 only). <strong><em>localhost</em></strong> needs both IPv4 and IPv6.</p>
             </blockquote>
         </div>
 
@@ -511,7 +512,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             </div>
 
             <?=$nut_mc_field('CUSTOM_UPSGLOBAL', 'ups.conf (global)', 'Global <strong><em>ups.conf</em></strong> directives, placed before the UPS section (e.g. <em>maxretry</em> or <em>pollinterval</em>).', 'maxretry = 3')?>
-            <?=$nut_mc_field('CUSTOM_UPS', 'ups.conf (UPS section)', 'Extra driver options for the configured UPS (e.g. <em>vendorid</em>, <em>serial</em> or SNMPv3 credentials). Add other local UPSes with a <em>[name]</em> section containing <em>driver</em> and <em>port</em>. They are monitored with power value 0 and do not affect shutdown by default. A custom <em>MONITOR name@127.0.0.1</em> line in <strong><em>Custom upsmon.conf Directives</em></strong> replaces that UPS’s generated monitor and can change its shutdown behavior.', 'vendorid = 051d')?>
+            <?=$nut_mc_field('CUSTOM_UPS', 'ups.conf (UPS section)', 'Extra driver options for the configured UPS (e.g. <em>vendorid</em>, <em>serial</em> or SNMPv3 credentials). Add other local UPSes with a <em>[name]</em> section containing <em>driver</em> and <em>port</em>. They are monitored with power value 0 and do not affect shutdown by default. A custom <em>MONITOR name@127.0.0.1</em> line (port 3493) in <strong><em>Custom upsmon.conf Directives</em></strong> replaces that UPS’s generated monitor and can change its shutdown behavior. So does <em>[::1]</em> if NUT listens on ::1, and <em>localhost</em> only if NUT listens on both IPv4 and IPv6, because it may resolve to either one. Any other line is kept next to the generated monitor, and a power-bearing line that cannot be tied to this NUT server is logged and its UPS is not powered off after a shutdown.', 'vendorid = 051d')?>
         </div>
         </div>
         </div>
