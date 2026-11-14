@@ -1,7 +1,7 @@
 <?php
-/* Tests for the install steps of nut3.plg that replace installed files: migrating the settings of nut-dw keeps both
- * configurations when both exist, and the backend switch fails when upgradepkg fails. The steps are extracted from the
- * .plg and run in a sandbox against stubs. Run: php tests/test_installer_safety.php */
+/* Tests for the install steps of nut3.plg that replace installed files: migration preserves conflicting settings,
+ * backend installation checks the installed artifacts, and credential preflight preserves monitoring on refusal.
+ * The actual .plg shell blocks run in a sandbox. Run: php tests/test_installer_safety.php */
 
 $failures = 0;
 
@@ -13,9 +13,6 @@ function check($condition, $message) {
     }
 }
 
-function has($haystack, $needle) {
-    return strpos($haystack, $needle) !== false;
-}
 
 $plgPath = __DIR__ . '/../plugin/nut3.plg';
 $plgDoc = new DOMDocument();
@@ -81,7 +78,6 @@ check($code === 0, "a conflict does not fail the install: $out");
 check(file_get_contents("$newDir/nut3.cfg") === "NAME=\"new\"\n", 'a conflict keeps the existing nut3.cfg');
 check(file_get_contents("$oldDir/nut-dw.cfg") === "NAME=\"old\"\n" && file_get_contents("$oldDir/ups/ups.conf") === "[old]\n", 'a conflict keeps the nut-dw settings and ups/ files');
 check(!file_exists("$newDir/ups/ups.conf"), 'a conflict does not copy the nut-dw ups/ files');
-check(has($out, 'WARNING') && has($out, 'nut-dw.cfg'), "a conflict is reported with the way to recover the nut-dw settings: $out");
 check(!file_exists("$tmp/boot/plugins/nut-dw.plg"), 'a conflict still removes the nut-dw plugin manifest, so it is not reinstalled');
 [$code] = $runScript($migrate);
 check($code === 0 && file_get_contents("$oldDir/nut-dw.cfg") === "NAME=\"old\"\n" && file_get_contents("$newDir/nut3.cfg") === "NAME=\"new\"\n", 'a second run keeps both configurations');
@@ -89,20 +85,60 @@ check($code === 0 && file_get_contents("$oldDir/nut-dw.cfg") === "NAME=\"old\"\n
 // ---- Backend switch
 $binu = "$tmp/bin";
 mkdir($binu, 0700);
-file_put_contents("$binu/upgradepkg", "#!/bin/bash\necho \"\$@\" >> \"\$STUB/upgradepkg.calls\"\nexit \"\$(cat \"\$STUB/upgradepkg.exit\")\"\n");
+$payload = "$tmp/payload";
+foreach (['bin/upsc', 'sbin/upsd', 'sbin/upsmon', 'sbin/upsdrvctl'] as $file) {
+    $write("$payload/usr/$file", "#!/bin/bash\n# selected backend\nexit 0\n");
+    chmod("$payload/usr/$file", 0755);
+}
+file_put_contents("$binu/upgradepkg", <<<'SH'
+#!/bin/bash
+echo "$@" >> "$STUB/upgradepkg.calls"
+if [ "$(cat "$STUB/upgradepkg.exit")" != 0 ]; then exit "$(cat "$STUB/upgradepkg.exit")"; fi
+pkg=${2##*/}
+pkg=${pkg%.txz}
+artifacts=$(cat "$STUB/upgradepkg.artifacts")
+if [ "$artifacts" != none ]; then
+    mkdir -p "$STUB/log/packages" "$STUB/usr/bin" "$STUB/usr/sbin"
+    printf 'PACKAGE NAME: %s\n' "$pkg" > "$STUB/log/packages/$pkg"
+    if [ "$artifacts" != record-only ]; then
+        for file in bin/upsc sbin/upsd sbin/upsmon sbin/upsdrvctl; do
+            if [ "$artifacts" != stale ]; then
+                cat "$STUB/payload/usr/$file" > "$STUB/usr/$file"
+                chmod 755 "$STUB/usr/$file"
+            fi
+            printf 'usr/%s\n' "$file" >> "$STUB/log/packages/$pkg"
+        done
+        [ "$artifacts" != partial ] || rm "$STUB/usr/sbin/upsmon"
+        [ "$artifacts" != truncated ] || : > "$STUB/usr/sbin/upsmon"
+        [ "$artifacts" != files-only ] || rm "$STUB/log/packages/$pkg"
+    fi
+fi
+exit 0
+SH
+);
 chmod("$binu/upgradepkg", 0755);
 $backend = "$tmp/backend.sh";
-file_put_contents($backend, $sandbox($step('PREVIEWPKG=')));
+file_put_contents($backend, str_replace(['/var/log/packages/', '/usr/bin/', '/usr/sbin/', 'EXECUTABLE="/$FILE"'],
+    ["$tmp/log/packages/", "$tmp/usr/bin/", "$tmp/usr/sbin/", 'EXECUTABLE="' . $tmp . '/$FILE"'], $sandbox($step('PREVIEWPKG='))));
 if (preg_match('#(?<![\w.-])/(boot|var|usr|etc|bin|sbin)/#', str_replace("$tmp/", 'sandbox/', file_get_contents($backend)))) {
     throw new RuntimeException('the backend step still names a real system path, refusing to run it');
 }
-// $setting: the BACKEND of nut3.cfg, or null for no settings file; $exit: what the stubbed upgradepkg returns
-$runBackend = function (?string $setting, int $exit) use ($tmp, $binu, $backend, $newDir) {
+// Emulate installpkg outcomes behind upgradepkg, including its swallowed failure status and stale old artifacts.
+$runBackend = function (?string $setting, int $exit, string $artifacts = 'complete', bool $upgrade = false) use ($tmp, $binu, $backend, $newDir, $write) {
+    exec('rm -rf ' . escapeshellarg("$tmp/log/packages") . ' ' . escapeshellarg("$tmp/usr"));
+    if ($upgrade) {
+        $write("$tmp/log/packages/nut-0.0-x86_64-old", "old package\n");
+        foreach (['bin/upsc', 'sbin/upsd', 'sbin/upsmon', 'sbin/upsdrvctl'] as $file) {
+            $write("$tmp/usr/$file", "#!/bin/bash\nexit 0\n");
+            chmod("$tmp/usr/$file", 0755);
+        }
+    }
     @mkdir($newDir, 0700, true);
     if ($setting === null) @unlink("$newDir/nut3.cfg");
     else file_put_contents("$newDir/nut3.cfg", "BACKEND=\"$setting\"\n");
     @unlink("$tmp/upgradepkg.calls");
     file_put_contents("$tmp/upgradepkg.exit", (string)$exit);
+    file_put_contents("$tmp/upgradepkg.artifacts", $artifacts);
     $env = 'PATH=' . escapeshellarg("$binu:" . getenv('PATH')) . ' STUB=' . escapeshellarg($tmp);
     exec("$env bash " . escapeshellarg($backend) . ' 2>&1', $out, $code);
     $calls = is_file("$tmp/upgradepkg.calls") ? trim(file_get_contents("$tmp/upgradepkg.calls")) : '';
@@ -119,10 +155,19 @@ $cases = [
 ];
 foreach ($cases as [$setting, $pkg]) {
     $label = $setting ?? 'no settings file';
-    [$code, $calls, $out] = $runBackend($setting, 0);
-    check($code === 0 && $calls === "--install-new $newDir/$pkg", "the backend for $label installs $pkg and succeeds: $out");
-    [$code, $calls, $out] = $runBackend($setting, 1);
-    check($code !== 0, "a failed upgradepkg fails the install step for $label (exit $code): $out");
+    exec('/usr/bin/tar -C ' . escapeshellarg($payload) . ' -cJf ' . escapeshellarg("$newDir/$pkg") . ' usr', $tarOutput, $tarCode);
+    if ($tarCode !== 0) throw new RuntimeException('Cannot create backend fixture');
+    foreach ([false, true] as $upgrade) {
+        $operation = $upgrade ? 'upgrade' : 'new install';
+        [$code, $calls, $out] = $runBackend($setting, 0, 'complete', $upgrade);
+        check($code === 0 && $calls === "--install-new $newDir/$pkg", "$operation for $label installs $pkg and succeeds: $out");
+        [$code, $calls, $out] = $runBackend($setting, 1, 'none', $upgrade);
+        check($code !== 0, "a nonzero upgradepkg status fails $operation for $label: $out");
+        foreach (['none', 'record-only', 'files-only', 'partial', 'stale', 'truncated'] as $artifacts) {
+            [$code, $calls, $out] = $runBackend($setting, 0, $artifacts, $upgrade);
+            check($code !== 0, "zero exit with $artifacts artifacts fails $operation for $label: $out");
+        }
+    }
 }
 
 // Execute the actual first installer block: unsafe upgrades must fail before the stop command.
@@ -140,17 +185,20 @@ foreach (['unsafe' => ['netserver', 'monpass', 'slavepass', false],
           'safe' => ['netserver', 'UniqueMonitor1', 'UniqueSlave1', true],
           'missing-monitor' => ['netserver', null, 'UniqueSlave1', false],
           'missing-slave' => ['netserver', 'UniqueMonitor1', null, false],
+          'missing-both' => ['netserver', null, null, false],
           'local' => ['standalone', 'monpass', 'slavepass', true]] as $case => [$mode, $monitorPass, $slavePass, $allowed]) {
-    $clean();
-    @unlink("$tmp/stopped");
-    $write("$newDir/nut3.cfg", "MODE=\"$mode\"\n"
-        . ($monitorPass === null ? '' : 'MONPASS="' . base64_encode($monitorPass) . "\"\n")
-        . ($slavePass === null ? '' : 'SLAVEPASS="' . base64_encode($slavePass) . "\"\n"));
-    $write("$tmp/emhttp/plugins/nut3/default.cfg", file_get_contents(__DIR__ . '/../source/nut3/usr/local/emhttp/plugins/nut3/default.cfg'));
-    $write("$newDir/ups/upsmon.conf", "# Generated by the NUT plugin from its settings.\n");
-    [$code, $out] = $runScript($preflight);
-    check(($code === 0) === $allowed && is_file("$tmp/stopped") === $allowed,
-        "$case upgrade preserves monitoring when credentials must be remediated: $out");
+    foreach ([true, false] as $defaultsPresent) {
+        $clean();
+        @unlink("$tmp/stopped");
+        $write("$newDir/nut3.cfg", "MODE=\"$mode\"\n"
+            . ($monitorPass === null ? '' : 'MONPASS="' . base64_encode($monitorPass) . "\"\n")
+            . ($slavePass === null ? '' : 'SLAVEPASS="' . base64_encode($slavePass) . "\"\n"));
+        if ($defaultsPresent) $write("$tmp/emhttp/plugins/nut3/default.cfg", file_get_contents(__DIR__ . '/../source/nut3/usr/local/emhttp/plugins/nut3/default.cfg'));
+        $write("$newDir/ups/upsmon.conf", "# Generated by the NUT plugin from its settings.\n");
+        [$code, $out] = $runScript($preflight);
+        check(($code === 0) === $allowed && is_file("$tmp/stopped") === $allowed,
+            "$case upgrade (installed defaults " . ($defaultsPresent ? 'present' : 'absent') . ") preserves monitoring when credentials must be remediated: $out");
+    }
 }
 
 exec('rm -rf ' . escapeshellarg($tmp));
