@@ -24,6 +24,10 @@ foreach ($nut_v_posted as $nut_v_key => $nut_v_value) {
 $nut_v_errors = isset($_POST['MODE']) ? nut_mc_validate(nut_mc_settings($nut_v_cfg)) : nut_mc_unsafe($nut_v_posted);
 
 if (isset($save)) {
+    // update.php persists the settings after this hook; only that exact saved configuration may activate the import.
+    if (!$nut_v_errors && isset($_POST['MODE']) && !nut_mc_accept(NUT_MC_DIR, $nut_v_cfg)) {
+        $nut_v_errors[] = 'Preparing the imported settings for activation failed; settings were not saved.';
+    }
     if ($nut_v_errors) {
         $save = false;
         unset($_POST['#command']);
@@ -31,9 +35,6 @@ if (isset($save)) {
         foreach ($nut_v_errors as $nut_v_error) {
             write_log('- ' . $nut_v_error);
         }
-    } elseif (isset($_POST['MODE'])) {
-        // the user reviewed and saved the imported settings, so the generated configuration takes over
-        nut_mc_accept();
     }
 } else {
     header('Content-Type: application/json');

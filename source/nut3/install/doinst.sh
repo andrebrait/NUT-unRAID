@@ -37,8 +37,8 @@ chmod 755 $DOCROOT/scripts/* \
         /usr/sbin/nut-upssched-cmd \
         /usr/sbin/nutstats
 
-# copy the default
-cp -n $DOCROOT/default.cfg $BOOT/nut3.cfg >/dev/null 2>&1
+# New installs get unique credentials; upgrades retain their existing settings.
+/usr/bin/php $DOCROOT/scripts/managed_config init || exit 1
 
 # replace reserved SECONDS variable (as found in legacy configurations)
 if grep -q '^SECONDS=' "$BOOT/nut3.cfg"; then

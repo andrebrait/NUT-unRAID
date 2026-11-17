@@ -41,7 +41,7 @@ if [ ! -d $BOOT/ups ]; then
 fi
 
 echo "Pulling default configuration files from package..."
-cp -f $DOCROOT/default.cfg $BOOT/nut3.cfg
+/usr/bin/php $DOCROOT/scripts/managed_config init || exit 1
 cp -rf $DOCROOT/nut-defaults/* $BOOT/ups/
 cp -rf $BOOT/ups/* /etc/nut/
 
