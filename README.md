@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="plugin/nut3.png" alt="NUT v3 logo" width="150">
+<img src="plugin/nut3.png" alt="Network UPS Tools (NUT) v3 logo" width="150">
 
-<h1>NUT v3 (Network UPS Tools)</h1>
+<h1>Network UPS Tools (NUT) v3</h1>
 
 <p><strong>A refactored, modernized version of the original NUT plugin for <a href="https://unraid.net/">Unraid</a>, focused on frequent updates.</strong></p>
 
@@ -17,7 +17,7 @@
 
 ## Fork notice
 
-This is a maintained fork of [desertwitch/NUT-unRAID](https://github.com/desertwitch/NUT-unRAID) by desertwitch. Upstream has announced its end of support, so this fork carries on maintaining the plugin and publishes its own releases as **NUT v3 (Network UPS Tools)**, plugin `nut3`, based on desertwitch's NUT plugin.
+This is a maintained fork of [desertwitch/NUT-unRAID](https://github.com/desertwitch/NUT-unRAID) by desertwitch. Upstream has announced its end of support, so this fork carries on maintaining the plugin and publishes its own releases as **Network UPS Tools (NUT) v3**, plugin `nut3`, based on desertwitch's NUT plugin.
 
 This fork also incorporates work from [David Coulson's NUT-unRAID fork](https://github.com/davidcoulson/NUT-unRAID), with original authorship preserved in the Git history.
 

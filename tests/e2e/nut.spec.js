@@ -13,7 +13,7 @@ test('Unraid\'s installpkg runs the plugin package\'s install script', () => {
   // skips doinst.sh (and the description) when the members are named "./install/..." instead of "install/..."
   const log = sudo(['cat', path.join(WORK, 'install.log')]);
   expect(log).toMatch(/Executing install script for nut-plugin-/);
-  expect(log).toContain('# NUT v3 (Network UPS Tools)');
+  expect(log).toContain('# Network UPS Tools (NUT) v3');
 });
 
 test.describe('NUT Settings', () => {
