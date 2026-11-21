@@ -9,9 +9,19 @@
     "package": "nut-2.8.5.1711_g1c4ab78c6-x86_64-2_andrebrait",
     "verified": "2026-11-12"
   },
+  "7.3.6": {
+    "sha256": "89131871b9c8f4cf75b75d6f841bc19619941abbf6fb165518bd2b4b3aa7ac1d",
+    "package": "nut-2.8.5.1711_g1c4ab78c6-x86_64-2_andrebrait",
+    "verified": "2026-11-21"
+  },
   "7.4.0": {
     "sha256": "c988c579fc68b31406d41473a4ad9e2b95ffbdb758ab0cb691669edc0a396c7c",
     "package": "nut-2.8.5.1711_g1c4ab78c6-x86_64-2_andrebrait",
     "verified": "2026-11-12"
+  },
+  "7.4.1": {
+    "sha256": "3372cf69676d28c31e9e92e2d6f9ebfe51b8fdabfe23d965a059a090a516c3b7",
+    "package": "nut-2.8.5.1711_g1c4ab78c6-x86_64-2_andrebrait",
+    "verified": "2026-11-21"
   }
 }
