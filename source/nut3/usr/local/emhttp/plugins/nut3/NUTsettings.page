@@ -330,7 +330,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                 <p><strong><em>0.0.0.0</em></strong> listens on all IPv4 interfaces. When listing specific addresses, include <strong><em>127.0.0.1</em></strong> for the local NUT monitor.</p>
                 <p>In <strong><em>Standalone</em></strong> mode NUT only listens on <strong><em>127.0.0.1</em></strong>.</p>
                 <p>To let a monitor use <strong><em>[::1]</em></strong> or <strong><em>localhost</em></strong>, add <strong><em>::1</em></strong>, or <strong><em>::</em></strong> as the last address (it listens on IPv6 only). <strong><em>localhost</em></strong> needs both IPv4 and IPv6.</p>
-                <p><u>Tailscale:</u> do not list the server's Tailscale address. NUT starts at boot before Tailscale is up and would fail to bind it. Keep <strong><em>127.0.0.1</em></strong> and forward the port with <strong><em>tailscale serve --bg --tcp 3493 tcp://127.0.0.1:3493</em></strong>; remote monitors keep using the Tailscale address.</p>
+                <p><u>Tailscale:</u> do not list the server's Tailscale address. NUT starts at boot before Tailscale is up and would fail to bind it. Keep <strong><em>127.0.0.1</em></strong> and forward the port with <strong><em>tailscale serve --bg --tcp 3493 tcp://127.0.0.1:3493</em></strong>; remote monitors keep using the Tailscale address. They then connect from 127.0.0.1, so the connected-slaves count in the footer does not show them.</p>
             </blockquote>
         </div>
 

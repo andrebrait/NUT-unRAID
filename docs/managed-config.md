@@ -129,7 +129,8 @@ time at boot and NUT starts before the Tailscale plugin has brought that address
 exits (`Fatal error: some listening interfaces were not available`). The local upsmon does not start either, and
 the server stays unprotected until NUT is started again.
 
-Keep upsd on loopback (`127.0.0.1`, plus `::1` if needed) and let Tailscale forward the port:
+This applies to Netserver mode, the only mode that sets listen addresses and creates the slave account remote
+monitors log in with. Keep upsd on loopback (`127.0.0.1`, plus `::1` if needed) and let Tailscale forward the port:
 
 ```sh
 tailscale serve --bg --tcp 3493 tcp://127.0.0.1:3493
@@ -139,6 +140,9 @@ Remote monitors keep connecting to the server's Tailscale address on port 3493. 
 in Tailscale's state, so it survives reboots, and the forward only starts once Tailscale is up, so nothing races.
 Only tailnet devices allowed by your Tailscale ACLs can reach it. `0.0.0.0` also avoids the race, but it exposes
 upsd on every network the server is on, and NUT answers status queries without a login.
+
+upsd sees forwarded monitors as connecting from `127.0.0.1`. The footer's connected-slaves count hides that address
+(it is the local monitor's), so it shows "No Active Connections" even while remote monitors are logged in.
 
 ## Escaping
 
