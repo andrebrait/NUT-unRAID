@@ -126,8 +126,9 @@ together with a matching `LISTEN` line, or listen on both families when using `l
 
 Do not list the server's Tailscale address (`100.x.y.z`) in the listen addresses. Plugins are installed one at a
 time at boot and NUT starts before the Tailscale plugin has brought that address up, so upsd fails to bind it and
-exits (`Fatal error: some listening interfaces were not available`). The local upsmon does not start either, and
-the server stays unprotected until NUT is started again.
+exits (`Fatal error: some listening interfaces were not available`). `rc.nut` then starts upsmon anyway and retries
+upsd every 10 seconds in the background. It alerts only if upsd still fails 5 minutes after the plugins finished
+installing (emhttpd started), and then stops retrying.
 
 This applies to Netserver mode, the only mode that sets listen addresses and creates the slave account remote
 monitors log in with. Keep upsd on loopback (`127.0.0.1`, plus `::1` if needed) and let Tailscale forward the port:
