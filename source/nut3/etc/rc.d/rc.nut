@@ -30,6 +30,7 @@ PLGPATH="/boot/config/plugins/nut3"
 CONFIG=$PLGPATH/nut3.cfg
 DOCROOT="/usr/local/emhttp/plugins/nut3"
 RC_SCRIPT=/etc/rc.d/rc.nut
+UPSD_RETRY_MATCH="$RC_SCRIPT upsd_retry\$"
 UPSD_RETRY_SECONDS=10
 UPSD_GRACE_SECONDS=300
 
@@ -144,23 +145,36 @@ start_driver() {
 }
 
 start_upsd() {
+    local out
     if pgrep -x upsd >/dev/null 2>&1; then
         echo "NUT upsd is running..."
-    elif ! /usr/sbin/upsd -u root; then
-        # A LISTEN address can come up after NUT starts at boot (a VPN such as Tailscale installs later). Retry in
-        # the background instead of failing; upsmon starts anyway and connects once upsd runs.
-        echo "WARNING: NUT upsd failed to start, retrying in the background..."
-        if ! pgrep -f "$RC_SCRIPT upsd_retry\$" >/dev/null 2>&1; then
-            nohup "$RC_SCRIPT" upsd_retry >/dev/null 2>&1 &
-        fi
+        return
+    fi
+    # upsd's messages go to a file, not through $(...): a pipe would wait for the daemon
+    out=$(mktemp) || error_at_start
+    if /usr/sbin/upsd -u root >"$out" 2>&1; then
+        cat "$out"; rm -f "$out"
+        return
+    fi
+    cat "$out"
+    # A LISTEN address can come up after NUT starts at boot (a VPN such as Tailscale installs later). Retry that in
+    # the background; upsmon starts anyway and connects once upsd runs. Any other failure still fails the start.
+    if ! grep -q "not listening on" "$out"; then
+        rm -f "$out"
+        error_at_start
+    fi
+    rm -f "$out"
+    echo "WARNING: NUT upsd could not listen on every LISTEN address, retrying in the background..."
+    if ! pgrep -f "$UPSD_RETRY_MATCH" >/dev/null 2>&1; then
+        nohup "$RC_SCRIPT" upsd_retry >/dev/null 2>&1 &
     fi
 }
 
-# Background retry of a upsd that failed to start, like fanctrlplus's boot start. Missing addresses only count once
-# the plugins are installed (Unraid starts emhttpd after the last one, or never: then after UPSD_GRACE_SECONDS), so
-# the alert comes only after a further UPSD_GRACE_SECONDS without upsd.
+# Background retry of a upsd that could not listen on every address. Missing addresses only count once the plugins are
+# installed (Unraid starts emhttpd after the last one, or never: then after UPSD_GRACE_SECONDS), so the alert comes only
+# after a further UPSD_GRACE_SECONDS without upsd. The retry goes on every minute after it, until upsd runs or NUT stops.
 upsd_retry() {
-    local wait_end=$((SECONDS + UPSD_GRACE_SECONDS)) grace_end=""
+    local wait_end=$((SECONDS + UPSD_GRACE_SECONDS)) grace_end="" alerted=""
     while :; do
         sleep "$UPSD_RETRY_SECONDS"
         "$RC_SCRIPT" upsd_try
@@ -168,18 +182,20 @@ upsd_retry() {
         if [ -z "$grace_end" ] && { pgrep -x emhttpd >/dev/null 2>&1 || [ $SECONDS -ge $wait_end ]; }; then
             grace_end=$((SECONDS + UPSD_GRACE_SECONDS))
         fi
-        [ -n "$grace_end" ] && [ $SECONDS -ge $grace_end ] && break
+        if [ -z "$alerted" ] && [ -n "$grace_end" ] && [ $SECONDS -ge $grace_end ]; then
+            alerted=1
+            UPSD_RETRY_SECONDS=60
+            logger -t rc.nut "NUT upsd still cannot listen on every LISTEN address, retrying every minute"
+            if [ -x /usr/local/emhttp/webGui/scripts/notify ]; then
+                timeout -s9 15 /usr/local/emhttp/webGui/scripts/notify -e "NUT" -s "NUT: upsd cannot listen on its addresses" -d "upsd cannot listen on every NUT Listen Address, so this system will NOT shut down on power loss until it can. NUT keeps retrying every minute. Check the SYSLOG." -i alert >/dev/null 2>&1
+            fi
+        fi
     done
-    logger -t rc.nut "NUT upsd still fails to start, giving up; check the LISTEN addresses"
-    if [ -x /usr/local/emhttp/webGui/scripts/notify ]; then
-        timeout -s9 15 /usr/local/emhttp/webGui/scripts/notify -e "NUT" -s "NUT: upsd failed to start" -d "upsd keeps failing to start (is every NUT Listen Address available?), so this system will NOT shut down on power loss. Check the SYSLOG." -i alert >/dev/null 2>&1
-    fi
-    [ -d $DOCROOT/misc ] && touch $DOCROOT/misc/start-failed
 }
 
-# One retry under the service lock: 0 upsd runs, 1 it failed again, 2 NUT was stopped meanwhile (no upsmon).
+# One retry under the service lock: 0 upsd runs, 1 it failed again, 2 NUT was stopped or became a slave meanwhile.
 upsd_try() {
-    pgrep -x upsmon >/dev/null 2>&1 || return 2
+    [ "$MODE" != "slave" ] && pgrep -x upsmon >/dev/null 2>&1 || return 2
     pgrep -x upsd >/dev/null 2>&1 && return 0
     /usr/sbin/upsd -u root >/dev/null 2>&1 || return 1
     logger -t rc.nut "NUT upsd started after a retry"
@@ -213,7 +229,7 @@ start() {
 
 stop() {
     echo "Stopping the NUT services... "
-    pkill -f "$RC_SCRIPT upsd_retry\$" 2>/dev/null
+    pkill -f "$UPSD_RETRY_MATCH" 2>/dev/null
     if pgrep -x upsmon >/dev/null 2>&1; then
         /usr/sbin/upsmon -c stop
 
