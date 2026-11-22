@@ -106,6 +106,16 @@ function nut_daemon_running($name, $pidfiles) {
 $nut_running      = nut_daemon_running("upsmon", ["/var/run/nut/upsmon.pid", "/var/run/upsmon.pid"]);
 $apc_running      = nut_daemon_running("apcupsd", ["/var/run/apcupsd.pid"]);
 
+// The slaves among `upsc -c` (clients logged in to the UPS) while the local upsmon runs. That upsmon is one login from
+// the master address; the GUI's own upsc query never logs in. Further logins from that address are slaves too, such as
+// monitors forwarded by `tailscale serve`, so only one entry is dropped.
+function nut_slave_clients(array $rows, $nut_ip) {
+    $own = explode(":", $nut_ip)[0];
+    $i = array_search($own, $rows, true);
+    if ($i !== false) unset($rows[$i]);
+    return array_values(array_map(fn($r) => $r === $own ? "$r (local or forwarded)" : $r, $rows));
+}
+
 # debug constant to overwrite ups.status
 // define('NUT_STATUS_DEBUG', 'OB DISCHRG BYPASS CAL');
 $nut_states = [

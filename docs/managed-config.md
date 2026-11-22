@@ -141,8 +141,9 @@ in Tailscale's state, so it survives reboots, and the forward only starts once T
 Only tailnet devices allowed by your Tailscale ACLs can reach it. `0.0.0.0` also avoids the race, but it exposes
 upsd on every network the server is on, and NUT answers status queries without a login.
 
-upsd sees forwarded monitors as connecting from `127.0.0.1`. The footer's connected-slaves count hides that address
-(it is the local monitor's), so it shows "No Active Connections" even while remote monitors are logged in.
+upsd sees forwarded monitors as connecting from `127.0.0.1`, so the connected slaves list them as
+`127.0.0.1 (local or forwarded)` instead of their Tailscale addresses. Only one `127.0.0.1` login, the local
+upsmon's, is left out of the list.
 
 ## Escaping
 
