@@ -3,7 +3,7 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "nut3">
 <!ENTITY author    "andrebrait">
-<!ENTITY version   "2026.11.17">
+<!ENTITY version   "2026.11.22">
 <!ENTITY launch    "Settings/NUTsettings">
 <!ENTITY gitURL    "https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master">
 <!ENTITY pluginURL "&gitURL;/plugin/&name;.plg">
@@ -20,6 +20,10 @@
 
 <CHANGES>
 ## Network UPS Tools (NUT) v3
+###2026.11.22
+- Retry upsd in the background when a listen address is missing at startup, such as a Tailscale address that comes up after NUT, and send one alert if it still cannot start five minutes after the webGUI is up.
+- List slaves that log in from 127.0.0.1, such as remote monitors forwarded by tailscale serve, as "127.0.0.1 (local or forwarded)" instead of hiding them with the local upsmon.
+- Document tailscale serve as the recommended way to reach NUT over Tailscale.
 ###2026.11.17
 - Package description now says Network UPS Tools (NUT) v3, matching the plugin listing.
 ###2026.11.14.1
