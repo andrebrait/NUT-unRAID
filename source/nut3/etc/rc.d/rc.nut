@@ -160,7 +160,7 @@ start_upsd() {
     # missing, or its name does not resolve yet. upsd exits on either with one of these lines (2.8 and 2.7.4; with a
     # debug level each line starts with a timestamp); retry that in the background, upsmon starts anyway and connects
     # once upsd runs. Any other failure still fails the start.
-    grep -qE "Fatal error: some listening interfaces were not available|no listening interface available|getaddrinfo.*(Name or service not known|Temporary failure in name resolution|No address associated)" "$out"
+    grep -qE "Fatal error: some listening interfaces were not available|no listening interface available|getaddrinfo.*(Name or service not known|Temporary failure in name resolution|Non-recoverable failure in name resolution|No address associated)" "$out"
     retry=$?
     rm -f "$out"
     [ $rc -eq 0 ] && return

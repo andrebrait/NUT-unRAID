@@ -111,7 +111,7 @@ $out = run("printf '%s' '$bind' > '$tmp/upsd.out'; start_upsd; echo rc=\$?");
 check(strpos($out, 'rc=0') !== false && strpos($out, 'not listening on') !== false && trim($read('spawned')) === "$tmp/rc upsd_retry", 'a missing address spawns the retry and shows upsd\'s messages: ' . $out);
 run("printf '%s' '$bind' > '$tmp/upsd.out'; touch '$tmp/running.rc upsd_retry'; start_upsd");
 check($read('spawned') === '', 'a retry already running is not spawned twice');
-foreach (["getaddrinfo('nas.tailnet.ts.net'): Temporary failure in name resolution", 'no listening interface available', "   0.000632\tFatal error: some listening interfaces were not available"] as $line) {
+foreach (["getaddrinfo('nas.tailnet.ts.net'): Temporary failure in name resolution", 'getaddrinfo: Name or service not known', 'getaddrinfo: Non-recoverable failure in name resolution', 'no listening interface available', "   0.000632\tFatal error: some listening interfaces were not available"] as $line) {
     run("echo \"$line\" > '$tmp/upsd.out'; start_upsd");
     check(trim($read('spawned')) === "$tmp/rc upsd_retry", "upsd exiting with '$line' is retried");
 }
