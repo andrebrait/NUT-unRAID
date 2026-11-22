@@ -178,7 +178,7 @@ upsd_retry() {
     while :; do
         sleep "$UPSD_RETRY_SECONDS"
         "$RC_SCRIPT" upsd_try
-        [ $? -eq 1 ] || return 0
+        case $? in 0|2) return 0 ;; esac  # any other code (a failed try, a lock timeout) tries again
         if [ -z "$grace_end" ] && { pgrep -x emhttpd >/dev/null 2>&1 || [ $SECONDS -ge $wait_end ]; }; then
             grace_end=$((SECONDS + UPSD_GRACE_SECONDS))
         fi

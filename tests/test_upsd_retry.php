@@ -65,6 +65,11 @@ file_put_contents("$tmp/tries", "1\n1\n0\n");
 run('upsd_retry');
 check($tries() === 3 && $alerts() === 0, 'a upsd that starts on a retry alerts nothing');
 
+// An unexpected exit code (a killed try, a missing command) keeps retrying
+file_put_contents("$tmp/tries", "127\n143\n0\n");
+run('upsd_retry');
+check($tries() === 3, 'an unexpected exit code is retried, not taken for success');
+
 // NUT stopped meanwhile: the retry ends without an alert
 file_put_contents("$tmp/tries", "1\n2\n");
 run('upsd_retry');
@@ -109,6 +114,7 @@ check(strpos($out, 'rc=0') !== false && $read('spawned') === '', 'a upsd that st
 
 // The tries take the service lock, and a stop ends a pending retry
 check(preg_match('/^    [a-z_|]*\bupsd_try\b[a-z_|]*\)\n        if \[ -z "\$RCNUT_LOCKED" \]/m', $rc) === 1, 'upsd_try runs under the service lock');
+check(preg_match('/^    upsd_try\) .*\n        upsd_try\n        exit \$\?$/m', $rc) === 1, 'rc.nut upsd_try exits with upsd_try\'s status');
 check(strpos(fn_body($rc, 'stop'), 'pkill -f "$UPSD_RETRY_MATCH"') !== false, 'stop ends a pending retry');
 
 // nut_slave_clients: drops one login from the master address, labels the others
