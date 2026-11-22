@@ -184,7 +184,7 @@ try {
             try {
                 exec(NUT_CLIENT_TIMEOUT . "/usr/bin/upsc -c -- ".escapeshellarg($nut_name)."@".escapeshellarg($nut_ip)." 2>/dev/null", $nutc_rows);
                 if(!empty($nutc_rows)) {
-                    $nutc_rows = array_diff($nutc_rows, [explode(":", $nut_ip)[0]]);
+                    $nutc_rows = nut_slave_clients($nutc_rows, $nut_ip);
                     $nutc_count = count($nutc_rows);
                     if(!empty($nutc_rows)) {
                         $status[3] = "<span id='nut_clients' class='tooltip-nut ".($nut_footer_style == 0 ? "$green" : "$black")."' data=\"<b>NUT Connected Slaves:</b><br>- ".implode("<br>- ",array_map('nut_tooltip_html', $nutc_rows))."\"><i class='fa fa-user-circle'></i>&thinsp;$nutc_count</span>";

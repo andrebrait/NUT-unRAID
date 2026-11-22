@@ -122,3 +122,16 @@ for (const { root: id, alarm, alarmBox } of tiles) {
     await expect(bell).toContainText('UPS alarm active');
   });
 }
+
+test('the footer counts every slave login but the local upsmon, forwarded ones from 127.0.0.1 included', async ({ page }) => {
+  upsc('battery.charge: 100', 'ups.status: OL');
+  // the local upsmon, a monitor forwarded by `tailscale serve`, and a remote one
+  root.write(`${FIXTURES}/upsc-clients.txt`, '127.0.0.1\n127.0.0.1\n100.64.0.5\n');
+  setCfg({ MODE: 'netserver' });
+  footerOn();
+  await page.goto(SETTINGS);
+  const clients = page.locator('#nut_clients');
+  await expect(clients).toHaveText(/2$/);
+  const tooltip = await clients.getAttribute('data');
+  expect(tooltip).toContain('- 127.0.0.1 (local or forwarded)<br>- 100.64.0.5');
+});

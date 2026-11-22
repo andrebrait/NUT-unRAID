@@ -29,11 +29,15 @@ export NUT_DEBUG_PID
 PLGPATH="/boot/config/plugins/nut3"
 CONFIG=$PLGPATH/nut3.cfg
 DOCROOT="/usr/local/emhttp/plugins/nut3"
+RC_SCRIPT=/etc/rc.d/rc.nut
+UPSD_RETRY_MATCH="$RC_SCRIPT upsd_retry\$"
+UPSD_RETRY_SECONDS=10
+UPSD_GRACE_SECONDS=300
 
 # serialize service and config changes; shutdown paths (rc.6) stay lock-free.
 # -o keeps the lock fd out of the daemons this script starts.
 case "$1" in
-    start|start_upsmon|stop|reload|restart|write_config)
+    start|start_upsmon|stop|reload|restart|write_config|upsd_try)
         if [ -z "$RCNUT_LOCKED" ]; then
             RCNUT_LOCKED=1 exec flock -o -w 180 /var/run/rc.nut.lock "$0" "$@"
         fi
@@ -141,11 +145,64 @@ start_driver() {
 }
 
 start_upsd() {
+    local out
     if pgrep -x upsd >/dev/null 2>&1; then
         echo "NUT upsd is running..."
-    else
-        /usr/sbin/upsd -u root || error_at_start
+        return
     fi
+    # upsd's messages go to a file, not through $(...): a pipe would wait for the daemon
+    out=$(mktemp) || error_at_start
+    if /usr/sbin/upsd -u root >"$out" 2>&1; then
+        cat "$out"; rm -f "$out"
+        return
+    fi
+    cat "$out"
+    # A LISTEN address can come up after NUT starts at boot (a VPN such as Tailscale installs later). Retry that in
+    # the background; upsmon starts anyway and connects once upsd runs. Any other failure still fails the start.
+    if ! grep -q "not listening on" "$out"; then
+        rm -f "$out"
+        error_at_start
+    fi
+    rm -f "$out"
+    echo "WARNING: NUT upsd could not listen on every LISTEN address, retrying in the background..."
+    if ! pgrep -f "$UPSD_RETRY_MATCH" >/dev/null 2>&1; then
+        nohup "$RC_SCRIPT" upsd_retry >/dev/null 2>&1 &
+    fi
+}
+
+# Background retry of a upsd that could not listen on every address. Missing addresses only count once the plugins are
+# installed (Unraid starts emhttpd after the last one, or never: then after UPSD_GRACE_SECONDS), so the alert comes only
+# after a further UPSD_GRACE_SECONDS without upsd. The retry goes on after it, backing off from 1 to 15 minutes (each
+# failed upsd start logs a few syslog lines), until upsd runs or NUT stops.
+upsd_retry() {
+    local wait_end=$((SECONDS + UPSD_GRACE_SECONDS)) grace_end="" alerted=""
+    while :; do
+        sleep "$UPSD_RETRY_SECONDS"
+        "$RC_SCRIPT" upsd_try
+        case $? in 0|2) return 0 ;; esac  # any other code (a failed try, a lock timeout) tries again
+        if [ -z "$grace_end" ] && { pgrep -x emhttpd >/dev/null 2>&1 || [ $SECONDS -ge $wait_end ]; }; then
+            grace_end=$((SECONDS + UPSD_GRACE_SECONDS))
+        fi
+        if [ -n "$alerted" ]; then
+            UPSD_RETRY_SECONDS=$((UPSD_RETRY_SECONDS * 2))
+            [ $UPSD_RETRY_SECONDS -le 900 ] || UPSD_RETRY_SECONDS=900
+        elif [ -n "$grace_end" ] && [ $SECONDS -ge $grace_end ]; then
+            alerted=1
+            UPSD_RETRY_SECONDS=60
+            logger -t rc.nut "NUT upsd still cannot listen on every LISTEN address, retrying with a backoff up to 15 minutes"
+            if [ -x /usr/local/emhttp/webGui/scripts/notify ]; then
+                timeout -s9 15 /usr/local/emhttp/webGui/scripts/notify -e "NUT" -s "NUT: upsd cannot listen on its addresses" -d "upsd cannot listen on every NUT Listen Address, so this system will NOT shut down on power loss until it can. NUT keeps retrying. Check the SYSLOG." -i alert >/dev/null 2>&1
+            fi
+        fi
+    done
+}
+
+# One retry under the service lock: 0 upsd runs, 1 it failed again, 2 NUT was stopped or became a slave meanwhile.
+upsd_try() {
+    [ "$MODE" != "slave" ] && pgrep -x upsmon >/dev/null 2>&1 || return 2
+    pgrep -x upsd >/dev/null 2>&1 && return 0
+    /usr/sbin/upsd -u root >/dev/null 2>&1 || return 1
+    logger -t rc.nut "NUT upsd started after a retry"
 }
 
 start_upsmon() {
@@ -176,6 +233,7 @@ start() {
 
 stop() {
     echo "Stopping the NUT services... "
+    pkill -f "$UPSD_RETRY_MATCH" 2>/dev/null
     if pgrep -x upsmon >/dev/null 2>&1; then
         /usr/sbin/upsmon -c stop
 
@@ -755,6 +813,13 @@ case "$1" in
         ;;
     write_config)
         write_config
+        ;;
+    upsd_retry) # internal: started by start_upsd
+        upsd_retry
+        ;;
+    upsd_try) # internal: one step of upsd_retry, under the service lock
+        upsd_try
+        exit $?
         ;;
     backup_logs)
         backup_logs

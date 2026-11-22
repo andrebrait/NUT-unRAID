@@ -122,6 +122,34 @@ A skipped monitor of a loopback address with a power value above 0 is logged to 
 UPS [name]`), except for the configured UPS, which is powered off anyway. To fix it, write `127.0.0.1` or `[::1]`
 together with a matching `LISTEN` line, or listen on both families when using `localhost`.
 
+## Remote monitors over Tailscale
+
+Do not list the server's Tailscale address (`100.x.y.z`) in the listen addresses. Plugins are installed one at a
+time at boot and NUT starts before the Tailscale plugin has brought that address up, so upsd fails to bind it and
+exits (`Fatal error: some listening interfaces were not available`). `rc.nut` then starts upsmon anyway and retries
+upsd every 10 seconds in the background. It alerts only if upsd still cannot listen 5 minutes after the plugins
+finished installing (emhttpd started), and keeps retrying after that, backing off to every 15 minutes. An address the
+server never gets (a typo, a removed interface, a port held by another program) therefore shows as that alert, not
+as a failed start; other upsd failures still fail the start. The legacy NUT 2.7.4 backend only stops when the first
+listen address is missing: it starts without a later one, and nothing retries it.
+
+This applies to Netserver mode, the only mode that sets listen addresses and creates the slave account remote
+monitors log in with. Keep upsd on loopback (`127.0.0.1`, plus `::1` if needed) and let Tailscale forward the port:
+
+```sh
+tailscale serve --bg --tcp 3493 tcp://127.0.0.1:3493
+```
+
+Remote monitors keep connecting to the server's Tailscale address on port 3493. The serve configuration is stored
+in Tailscale's state, so it survives reboots, and the forward only starts once Tailscale is up, so nothing races.
+Only tailnet devices allowed by your Tailscale ACLs can reach it, and upsd sees all of them as `127.0.0.1`, so
+source-address restrictions on upsd no longer tell them apart. `0.0.0.0` also avoids the race, but it exposes
+upsd on every network the server is on, and NUT answers status queries without a login.
+
+upsd sees forwarded monitors as connecting from `127.0.0.1`, so the connected slaves list them as
+`127.0.0.1 (local or forwarded)` instead of their Tailscale addresses. Only one `127.0.0.1` login, the local
+upsmon's, is left out of the list.
+
 ## Escaping
 
 Free-text values (port, SNMP community, passwords) are written in double quotes, with `\`, `"` and `#`
