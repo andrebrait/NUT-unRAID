@@ -21,8 +21,8 @@
 <CHANGES>
 ## Network UPS Tools (NUT) v3
 ###2026.11.22
-- Retry upsd in the background when a listen address is missing at startup, such as a Tailscale address that comes up after NUT, and send one alert if it still cannot start five minutes after the webGUI is up.
-- List slaves that log in from 127.0.0.1, such as remote monitors forwarded by tailscale serve, as "127.0.0.1 (local or forwarded)" instead of hiding them with the local upsmon.
+- Retry upsd in the background when a listen address is missing or its name does not resolve at startup, such as a Tailscale address that comes up after NUT. One alert follows if upsd still cannot start five minutes after the webGUI is up, and a notice once it does.
+- List slaves that log in from 127.0.0.1, such as remote monitors forwarded by tailscale serve, as "127.0.0.1 (local or forwarded)" instead of hiding them with the local upsmon. An IPv6 server address no longer lists the local upsmon as a slave.
 - Document tailscale serve as the recommended way to reach NUT over Tailscale.
 ###2026.11.17
 - Package description now says Network UPS Tools (NUT) v3, matching the plugin listing.

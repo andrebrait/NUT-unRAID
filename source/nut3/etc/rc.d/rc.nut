@@ -30,7 +30,8 @@ PLGPATH="/boot/config/plugins/nut3"
 CONFIG=$PLGPATH/nut3.cfg
 DOCROOT="/usr/local/emhttp/plugins/nut3"
 RC_SCRIPT=/etc/rc.d/rc.nut
-UPSD_RETRY_MATCH="$RC_SCRIPT upsd_retry\$"
+# anchored like nut-notify's in stop(): a bare substring would also match e.g. a pgrep or grep naming the command
+UPSD_RETRY_MATCH="^((/usr)?/bin/bash[[:space:]]+|bash[[:space:]]+)?$RC_SCRIPT upsd_retry\$"
 UPSD_RETRY_SECONDS=10
 UPSD_GRACE_SECONDS=300
 
@@ -145,25 +146,24 @@ start_driver() {
 }
 
 start_upsd() {
-    local out
+    local out rc retry
     if pgrep -x upsd >/dev/null 2>&1; then
         echo "NUT upsd is running..."
         return
     fi
     # upsd's messages go to a file, not through $(...): a pipe would wait for the daemon
     out=$(mktemp) || error_at_start
-    if /usr/sbin/upsd -u root >"$out" 2>&1; then
-        cat "$out"; rm -f "$out"
-        return
-    fi
+    /usr/sbin/upsd -u root >"$out" 2>&1
+    rc=$?
     cat "$out"
-    # A LISTEN address can come up after NUT starts at boot (a VPN such as Tailscale installs later). Retry that in
-    # the background; upsmon starts anyway and connects once upsd runs. Any other failure still fails the start.
-    if ! grep -q "not listening on" "$out"; then
-        rm -f "$out"
-        error_at_start
-    fi
+    # A LISTEN address can come up after NUT starts at boot (a VPN such as Tailscale installs later): its address is
+    # missing, or its name does not resolve yet. upsd exits on either with one of these lines (2.8 and 2.7.4); retry
+    # that in the background, upsmon starts anyway and connects once upsd runs. Any other failure still fails the start.
+    grep -qE "^Fatal error: some listening interfaces were not available|no listening interface available|getaddrinfo" "$out"
+    retry=$?
     rm -f "$out"
+    [ $rc -eq 0 ] && return
+    [ $retry -eq 0 ] || error_at_start
     echo "WARNING: NUT upsd could not listen on every LISTEN address, retrying in the background..."
     if ! pgrep -f "$UPSD_RETRY_MATCH" >/dev/null 2>&1; then
         nohup "$RC_SCRIPT" upsd_retry >/dev/null 2>&1 &
@@ -179,7 +179,14 @@ upsd_retry() {
     while :; do
         sleep "$UPSD_RETRY_SECONDS"
         "$RC_SCRIPT" upsd_try
-        case $? in 0|2) return 0 ;; esac  # any other code (a failed try, a lock timeout) tries again
+        case $? in  # any other code (a failed try, a lock timeout, a bash error) tries again
+            0)
+                if [ -n "$alerted" ] && [ -x /usr/local/emhttp/webGui/scripts/notify ]; then
+                    timeout -s9 15 /usr/local/emhttp/webGui/scripts/notify -e "NUT" -s "NUT: upsd is listening again" -d "upsd started after a retry, so this system shuts down on power loss again." -i normal >/dev/null 2>&1
+                fi
+                return 0 ;;
+            3) return 0 ;;
+        esac
         if [ -z "$grace_end" ] && { pgrep -x emhttpd >/dev/null 2>&1 || [ $SECONDS -ge $wait_end ]; }; then
             grace_end=$((SECONDS + UPSD_GRACE_SECONDS))
         fi
@@ -197,9 +204,10 @@ upsd_retry() {
     done
 }
 
-# One retry under the service lock: 0 upsd runs, 1 it failed again, 2 NUT was stopped or became a slave meanwhile.
+# One retry under the service lock: 0 upsd runs, 1 it failed again, 3 NUT was stopped or became a slave meanwhile
+# (not 2, which bash itself exits with on a syntax error).
 upsd_try() {
-    [ "$MODE" != "slave" ] && pgrep -x upsmon >/dev/null 2>&1 || return 2
+    [ "$MODE" != "slave" ] && pgrep -x upsmon >/dev/null 2>&1 || return 3
     pgrep -x upsd >/dev/null 2>&1 && return 0
     /usr/sbin/upsd -u root >/dev/null 2>&1 || return 1
     logger -t rc.nut "NUT upsd started after a retry"

@@ -107,13 +107,13 @@ $nut_running      = nut_daemon_running("upsmon", ["/var/run/nut/upsmon.pid", "/v
 $apc_running      = nut_daemon_running("apcupsd", ["/var/run/apcupsd.pid"]);
 
 // The slaves among `upsc -c`, which lists every login (the GUI's own query never logs in). One login from $nut_ip is the
-// local upsmon; further ones are slaves, e.g. forwarded by `tailscale serve`. While the local upsmon is not logged in,
-// one of them is hidden.
+// local upsmon; further ones are slaves, e.g. forwarded by `tailscale serve` (from loopback, labelled). While the local
+// upsmon is not logged in, one of them is hidden. $nut_ip may carry a port (10.0.0.2:3493, [::1]:3493), a bare IPv6 not.
 function nut_slave_clients(array $rows, $nut_ip) {
-    $own = explode(":", $nut_ip)[0];
+    $own = preg_match('/^\[(.*)\]/', $nut_ip, $m) ? $m[1] : (substr_count($nut_ip, ":") === 1 ? strstr($nut_ip, ":", true) : $nut_ip);
     $i = array_search($own, $rows, true);
     if ($i !== false) unset($rows[$i]);
-    return array_values(array_map(fn($r) => $r === $own ? "$r (local or forwarded)" : $r, $rows));
+    return array_values(array_map(fn($r) => in_array($r, [$own, "127.0.0.1", "::1"], true) ? "$r (local or forwarded)" : $r, $rows));
 }
 
 # debug constant to overwrite ups.status
