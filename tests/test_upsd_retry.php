@@ -98,7 +98,7 @@ file_put_contents("$tmp/tries", str_repeat("1\n", 60) . "0\n");
 run('upsd_retry');
 check($tries() === 61 && $alerts() === 1, 'without emhttpd the alert comes after 10 minutes: ' . $tries() . ' tries');
 
-// upsd_try: 2 without upsmon or in slave mode, 0 when upsd already runs, 1 when it fails, 0 and a log line on a start
+// upsd_try: 3 without upsmon or in slave mode, 0 when upsd already runs, 1 when it fails, 0 and a log line on a start
 check(trim(run('upsd_try; echo $?')) === '3', 'upsd_try without upsmon reports a stop');
 check(trim(run("touch '$tmp/running.upsmon'; MODE=slave; upsd_try; echo \$?")) === '3', 'upsd_try in slave mode reports a stop');
 check(trim(run("touch '$tmp/running.upsmon' '$tmp/running.upsd'; upsd_try; echo \$?")) === '0', 'upsd_try with upsd running reports success');
@@ -111,11 +111,11 @@ $out = run("printf '%s' '$bind' > '$tmp/upsd.out'; start_upsd; echo rc=\$?");
 check(strpos($out, 'rc=0') !== false && strpos($out, 'not listening on') !== false && trim($read('spawned')) === "$tmp/rc upsd_retry", 'a missing address spawns the retry and shows upsd\'s messages: ' . $out);
 run("printf '%s' '$bind' > '$tmp/upsd.out'; touch '$tmp/running.rc upsd_retry'; start_upsd");
 check($read('spawned') === '', 'a retry already running is not spawned twice');
-foreach (["getaddrinfo('nas.tailnet.ts.net'): Temporary failure in name resolution", 'no listening interface available'] as $line) {
+foreach (["getaddrinfo('nas.tailnet.ts.net'): Temporary failure in name resolution", 'no listening interface available', "   0.000632\tFatal error: some listening interfaces were not available"] as $line) {
     run("echo \"$line\" > '$tmp/upsd.out'; start_upsd");
     check(trim($read('spawned')) === "$tmp/rc upsd_retry", "upsd exiting with '$line' is retried");
 }
-foreach (['Fatal error: unusable configuration', "not listening on 100.64.0.1 port 3493\nWARNING: some listening interfaces were not available, but the ALLOW_NOT_ALL_LISTENERS setting is active\nstat /x.pem: No such file or directory"] as $text) {
+foreach (['Fatal error: unusable configuration', 'getaddrinfo: Servname not supported for ai_socktype', "not listening on 100.64.0.1 port 3493\nWARNING: some listening interfaces were not available, but the ALLOW_NOT_ALL_LISTENERS setting is active\nstat /x.pem: No such file or directory"] as $text) {
     $out = run("printf '%b\\n' '$text' > '$tmp/upsd.out'; start_upsd; echo rc=\$?");
     check(strpos($out, 'error_at_start') !== false && strpos($out, 'rc=0') === false && $read('spawned') === '', 'another upsd failure still fails the start: ' . $out);
 }
@@ -126,7 +126,7 @@ check(strpos($out, 'rc=0') !== false && $read('spawned') === '', 'a upsd that st
 check(preg_match('/^    [a-z_|]*\bupsd_try\b[a-z_|]*\)\n        if \[ -z "\$RCNUT_LOCKED" \]/m', $rc) === 1, 'upsd_try runs under the service lock');
 check(preg_match('/^    upsd_try\) .*\n        upsd_try\n        exit \$\?$/m', $rc) === 1, 'rc.nut upsd_try exits with upsd_try\'s status');
 check(strpos(fn_body($rc, 'stop'), 'pkill -f "$UPSD_RETRY_MATCH"') !== false, 'stop ends a pending retry');
-$cmds = "/bin/bash /etc/rc.d/rc.nut upsd_retry\n/etc/rc.d/rc.nut upsd_retry\npgrep -f /etc/rc.d/rc.nut upsd_retry\n/bin/bash /etc/rc.d/rc.nut upsd_retry_x\n";
+$cmds = "/bin/bash /etc/rc.d/rc.nut upsd_retry\n/etc/rc.d/rc.nut upsd_retry\npgrep -f /etc/rc.d/rc.nut upsd_retry\n/bin/bash /etc/rc.d/rc.nut upsd_retry_x\n/bin/bash /etc/rcXd/rcYnut upsd_retry\n";
 exec('bash -c ' . escapeshellarg("RC_SCRIPT=/etc/rc.d/rc.nut; $match; printf '%s' " . escapeshellarg($cmds) . ' | grep -E "$UPSD_RETRY_MATCH"'), $hits);
 check($hits === ['/bin/bash /etc/rc.d/rc.nut upsd_retry', '/etc/rc.d/rc.nut upsd_retry'], 'the retry match is anchored to the retry process: ' . implode(' | ', $hits));
 

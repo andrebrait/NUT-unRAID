@@ -31,7 +31,7 @@ CONFIG=$PLGPATH/nut3.cfg
 DOCROOT="/usr/local/emhttp/plugins/nut3"
 RC_SCRIPT=/etc/rc.d/rc.nut
 # anchored like nut-notify's in stop(): a bare substring would also match e.g. a pgrep or grep naming the command
-UPSD_RETRY_MATCH="^((/usr)?/bin/bash[[:space:]]+|bash[[:space:]]+)?$RC_SCRIPT upsd_retry\$"
+UPSD_RETRY_MATCH="^((/usr)?/bin/bash[[:space:]]+|bash[[:space:]]+)?${RC_SCRIPT//./\\.} upsd_retry\$"
 UPSD_RETRY_SECONDS=10
 UPSD_GRACE_SECONDS=300
 
@@ -157,9 +157,10 @@ start_upsd() {
     rc=$?
     cat "$out"
     # A LISTEN address can come up after NUT starts at boot (a VPN such as Tailscale installs later): its address is
-    # missing, or its name does not resolve yet. upsd exits on either with one of these lines (2.8 and 2.7.4); retry
-    # that in the background, upsmon starts anyway and connects once upsd runs. Any other failure still fails the start.
-    grep -qE "^Fatal error: some listening interfaces were not available|no listening interface available|getaddrinfo" "$out"
+    # missing, or its name does not resolve yet. upsd exits on either with one of these lines (2.8 and 2.7.4; with a
+    # debug level each line starts with a timestamp); retry that in the background, upsmon starts anyway and connects
+    # once upsd runs. Any other failure still fails the start.
+    grep -qE "Fatal error: some listening interfaces were not available|no listening interface available|getaddrinfo.*(Name or service not known|Temporary failure in name resolution|No address associated)" "$out"
     retry=$?
     rm -f "$out"
     [ $rc -eq 0 ] && return
