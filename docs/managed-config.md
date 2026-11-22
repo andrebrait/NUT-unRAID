@@ -122,6 +122,24 @@ A skipped monitor of a loopback address with a power value above 0 is logged to 
 UPS [name]`), except for the configured UPS, which is powered off anyway. To fix it, write `127.0.0.1` or `[::1]`
 together with a matching `LISTEN` line, or listen on both families when using `localhost`.
 
+## Remote monitors over Tailscale
+
+Do not list the server's Tailscale address (`100.x.y.z`) in the listen addresses. Plugins are installed one at a
+time at boot and NUT starts before the Tailscale plugin has brought that address up, so upsd fails to bind it and
+exits (`Fatal error: some listening interfaces were not available`). The local upsmon does not start either, and
+the server stays unprotected until NUT is started again.
+
+Keep upsd on loopback (`127.0.0.1`, plus `::1` if needed) and let Tailscale forward the port:
+
+```sh
+tailscale serve --bg --tcp 3493 tcp://127.0.0.1:3493
+```
+
+Remote monitors keep connecting to the server's Tailscale address on port 3493. The serve configuration is stored
+in Tailscale's state, so it survives reboots, and the forward only starts once Tailscale is up, so nothing races.
+Only tailnet devices allowed by your Tailscale ACLs can reach it. `0.0.0.0` also avoids the race, but it exposes
+upsd on every network the server is on, and NUT answers status queries without a login.
+
 ## Escaping
 
 Free-text values (port, SNMP community, passwords) are written in double quotes, with `\`, `"` and `#`
