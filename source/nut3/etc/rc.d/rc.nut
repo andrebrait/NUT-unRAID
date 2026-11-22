@@ -172,7 +172,8 @@ start_upsd() {
 
 # Background retry of a upsd that could not listen on every address. Missing addresses only count once the plugins are
 # installed (Unraid starts emhttpd after the last one, or never: then after UPSD_GRACE_SECONDS), so the alert comes only
-# after a further UPSD_GRACE_SECONDS without upsd. The retry goes on every minute after it, until upsd runs or NUT stops.
+# after a further UPSD_GRACE_SECONDS without upsd. The retry goes on after it, backing off from 1 to 15 minutes (each
+# failed upsd start logs a few syslog lines), until upsd runs or NUT stops.
 upsd_retry() {
     local wait_end=$((SECONDS + UPSD_GRACE_SECONDS)) grace_end="" alerted=""
     while :; do
@@ -182,12 +183,15 @@ upsd_retry() {
         if [ -z "$grace_end" ] && { pgrep -x emhttpd >/dev/null 2>&1 || [ $SECONDS -ge $wait_end ]; }; then
             grace_end=$((SECONDS + UPSD_GRACE_SECONDS))
         fi
-        if [ -z "$alerted" ] && [ -n "$grace_end" ] && [ $SECONDS -ge $grace_end ]; then
+        if [ -n "$alerted" ]; then
+            UPSD_RETRY_SECONDS=$((UPSD_RETRY_SECONDS * 2))
+            [ $UPSD_RETRY_SECONDS -le 900 ] || UPSD_RETRY_SECONDS=900
+        elif [ -n "$grace_end" ] && [ $SECONDS -ge $grace_end ]; then
             alerted=1
             UPSD_RETRY_SECONDS=60
-            logger -t rc.nut "NUT upsd still cannot listen on every LISTEN address, retrying every minute"
+            logger -t rc.nut "NUT upsd still cannot listen on every LISTEN address, retrying with a backoff up to 15 minutes"
             if [ -x /usr/local/emhttp/webGui/scripts/notify ]; then
-                timeout -s9 15 /usr/local/emhttp/webGui/scripts/notify -e "NUT" -s "NUT: upsd cannot listen on its addresses" -d "upsd cannot listen on every NUT Listen Address, so this system will NOT shut down on power loss until it can. NUT keeps retrying every minute. Check the SYSLOG." -i alert >/dev/null 2>&1
+                timeout -s9 15 /usr/local/emhttp/webGui/scripts/notify -e "NUT" -s "NUT: upsd cannot listen on its addresses" -d "upsd cannot listen on every NUT Listen Address, so this system will NOT shut down on power loss until it can. NUT keeps retrying. Check the SYSLOG." -i alert >/dev/null 2>&1
             fi
         fi
     done

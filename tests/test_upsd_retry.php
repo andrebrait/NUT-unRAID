@@ -20,7 +20,7 @@ function fn_body($text, $name) {
 }
 
 $tmp = sys_get_temp_dir() . '/nut-upsd-retry-' . bin2hex(random_bytes(12));
-if (!mkdir($tmp, 0700)) throw new RuntimeException('Cannot create test sandbox');
+if (!mkdir("$tmp/misc", 0700, true)) throw new RuntimeException('Cannot create test sandbox');
 
 $fns = fn_body($rc, 'start_upsd') . "\n" . fn_body($rc, 'upsd_retry') . "\n" . fn_body($rc, 'upsd_try');
 $fns = str_replace(['/usr/local/emhttp/webGui/scripts/notify', '/usr/sbin/upsd'], ["$tmp/notify", 'upsd'], $fns);
@@ -32,6 +32,7 @@ file_put_contents("$tmp/rc", <<<SH
 n=0; [ -f "$tmp/n" ] && read -r n < "$tmp/n"; echo \$((n + 1)) > "$tmp/n"
 line=\$(sed -n "\$((n + 1))p" "$tmp/tries"); [ -n "\$line" ] || line=\$(tail -n 1 "$tmp/tries")
 case "\$line" in *emhttpd*) touch "$tmp/running.emhttpd" ;; esac
+[ "\$n" -lt 500 ] || exit 0  # a broken retry loop fails the counts instead of hanging the suite
 exit "\${line%% *}"
 SH);
 chmod("$tmp/notify", 0755);
@@ -41,7 +42,7 @@ chmod("$tmp/rc", 0755);
  * from marker files ($tmp/running.<name>), and upsd answering from $tmp/upsd.out and $tmp/upsd.ok. */
 function run($body) {
     global $tmp, $fns;
-    foreach (glob("$tmp/{notify.calls,log,n,sleeps,spawned,running.*,upsd.*}", GLOB_BRACE) as $f) unlink($f);
+    foreach (glob("$tmp/{notify.calls,log,n,sleeps,spawned,running.*,upsd.*,misc/start-failed}", GLOB_BRACE) as $f) unlink($f);
     $stubs = <<<SH
 sleep() { echo "\$1" >> "$tmp/sleeps"; SECONDS=\$((SECONDS + \$1)); }
 pgrep() { local name="\${@: -1}"; name="\${name##*/}"; name="\${name%\\\$}"; [ -f "$tmp/running.\$name" ]; }
@@ -49,8 +50,8 @@ timeout() { shift 2; "\$@"; }
 logger() { shift 2; echo "\$*" >> "$tmp/log"; }
 nohup() { echo "\$*" >> "$tmp/spawned"; }
 error_at_start() { echo error_at_start; exit 1; }
-upsd() { cat "$tmp/upsd.out" 2>/dev/null; [ -f "$tmp/upsd.ok" ] && touch "$tmp/running.upsd"; [ -f "$tmp/upsd.ok" ]; }
-UPSD_RETRY_SECONDS=10; UPSD_GRACE_SECONDS=300; MODE=netserver
+upsd() { cat "$tmp/upsd.out" >&2 2>/dev/null; [ -f "$tmp/upsd.ok" ] && touch "$tmp/running.upsd"; [ -f "$tmp/upsd.ok" ]; }
+UPSD_RETRY_SECONDS=10; UPSD_GRACE_SECONDS=300; MODE=netserver; DOCROOT='$tmp'
 RC_SCRIPT='$tmp/rc'; UPSD_RETRY_MATCH="\$RC_SCRIPT upsd_retry\\\$"
 SH;
     exec('bash -c ' . escapeshellarg("$stubs\n$fns\n$body") . ' 2>&1', $out);
@@ -76,13 +77,13 @@ run('upsd_retry');
 check($tries() === 2 && $alerts() === 0, 'a stop ends the retry quietly');
 
 // The grace period starts once emhttpd runs: plugins install for 2 minutes, then 5 more minutes of retries, then the
-// retry goes on every minute until upsd starts
-file_put_contents("$tmp/tries", str_repeat("1\n", 11) . "1 emhttpd\n" . str_repeat("1\n", 32) . "0\n");
+// retry goes on, backing off from 1 to 15 minutes, until upsd starts
+file_put_contents("$tmp/tries", str_repeat("1\n", 11) . "1 emhttpd\n" . str_repeat("1\n", 36) . "0\n");
 run('upsd_retry');
 $sleeps = array_map('intval', file("$tmp/sleeps"));
-check($tries() === 45 && $alerts() === 1, 'one alert, 5 minutes after emhttpd started, then retries until upsd starts: ' . $tries() . ' tries');
-check(array_slice($sleeps, 0, 42) === array_fill(0, 42, 10) && array_slice($sleeps, 42) === [60, 60, 60], 'retries every 10 s, every minute after the alert');
-check(strpos($read('notify.calls'), '-i alert') !== false && strpos($read('log'), 'retrying every minute') !== false, 'the alert is an Unraid alert and is logged');
+check($tries() === 49 && $alerts() === 1 && !is_file("$tmp/misc/start-failed"), 'one alert, 5 minutes after emhttpd started, then retries until upsd starts: ' . $tries() . ' tries');
+check(array_slice($sleeps, 0, 42) === array_fill(0, 42, 10) && array_slice($sleeps, 42) === [60, 120, 240, 480, 900, 900, 900], 'retries every 10 s, then backs off to 15 minutes after the alert');
+check(strpos($read('notify.calls'), '-i alert') !== false && strpos($read('log'), 'backoff') !== false, 'the alert is an Unraid alert and is logged');
 
 // A upsd that starts during the grace period alerts nothing
 file_put_contents("$tmp/tries", "1 emhttpd\n" . str_repeat("1\n", 20) . "0\n");
