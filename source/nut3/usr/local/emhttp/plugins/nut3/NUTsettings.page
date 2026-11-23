@@ -512,6 +512,44 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                 </blockquote>
             </div>
 
+            <?
+            $nut_matching_quirks = nut_quirks_matching($nut_mc);
+            $nut_disabled_quirks = nut_quirks_disabled($nut_mc);
+            $nut_preserved_quirks = array_values(array_diff($nut_disabled_quirks, array_keys($nut_matching_quirks)));
+            ?>
+            <input type="hidden" class="nut-run" id="QUIRKS_DISABLED" name="QUIRKS_DISABLED" value="<?=htmlspecialchars($nut_mc['QUIRKS_DISABLED'] ?? '', ENT_QUOTES)?>" data-preserved="<?=htmlspecialchars(implode(' ', $nut_preserved_quirks), ENT_QUOTES)?>">
+            <dl id="NUT_QUIRKS">
+                <dt>Hardware Quirks:</dt>
+                <dd>
+                    <?if (!$nut_matching_quirks):?>
+                        <span class="nut-muted">No hardware quirks apply to your current UPS and driver.</span>
+                    <?else:?>
+                        <div class="nut-quirks-list">
+                        <?foreach ($nut_matching_quirks as $nut_qid => $nut_q):
+                            $nut_q_enabled = !in_array($nut_qid, $nut_disabled_quirks, true);
+                            $nut_q_modal = htmlspecialchars(json_encode([
+                                'title'      => $nut_q['title'],
+                                'details'    => $nut_q['details'],
+                                'directives' => nut_quirk_format_directives($nut_q),
+                            ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES);
+                        ?>
+                            <div class="nut-quirk-item">
+                                <label>
+                                    <input type="checkbox" class="nut-run nut-quirk-toggle" data-quirk="<?=htmlspecialchars($nut_qid, ENT_QUOTES)?>" <?=$nut_q_enabled ? 'checked' : ''?>>
+                                    <?=htmlspecialchars($nut_q['title'])?>
+                                </label>
+                                <span class="nut-quirk-info nut-pointer" role="button" tabindex="0" title="About this workaround" aria-label="About <?=htmlspecialchars($nut_q['title'], ENT_QUOTES)?>" data-quirk-info="<?=$nut_q_modal?>"><i class="fa fa-info-circle"></i></span>
+                            </div>
+                        <?endforeach;?>
+                        </div>
+                    <?endif;?>
+                </dd>
+            </dl>
+            <blockquote class="inline_help">
+                <p>Hardware- and driver-specific workarounds detected for your UPS are enabled by default. Uncheck any workaround individually to opt out, or click its <i class="fa fa-info-circle"></i> icon to see what it does and which directives it adds to <strong><em>ups.conf</em></strong>.</p>
+                <p>Any directive set in <strong><em>Custom ups.conf (UPS section) Directives</em></strong> below overrides the corresponding quirk directive.</p>
+            </blockquote>
+
             <?=$nut_mc_field('CUSTOM_UPSGLOBAL', 'ups.conf (global)', 'Global <strong><em>ups.conf</em></strong> directives, placed before the UPS section (e.g. <em>maxretry</em> or <em>pollinterval</em>).', 'maxretry = 3')?>
             <?=$nut_mc_field('CUSTOM_UPS', 'ups.conf (UPS section)', 'Extra driver options for the configured UPS (e.g. <em>vendorid</em>, <em>serial</em> or SNMPv3 credentials). Add other local UPSes with a <em>[name]</em> section containing <em>driver</em> and <em>port</em>. They are monitored with power value 0 and do not affect shutdown by default. A custom <em>MONITOR name@127.0.0.1</em> line (port 3493) in <strong><em>Custom upsmon.conf Directives</em></strong> replaces that UPS’s generated monitor and can change its shutdown behavior. So does <em>[::1]</em> if NUT listens on ::1, and <em>localhost</em> only if NUT listens on both IPv4 and IPv6, because it may resolve to either one. Any other line is kept next to the generated monitor, and a power-bearing line that cannot be tied to this NUT server is logged and its UPS is not powered off after a shutdown.', 'vendorid = 051d')?>
         </div>
@@ -1397,7 +1435,37 @@ function decData() {
     });
 }
 
+function syncQuirksDisabled() {
+    var $field = $('#QUIRKS_DISABLED');
+    if (!$field.length) return;
+    var preserved = ($field.attr('data-preserved') || '').trim();
+    var disabled = preserved ? preserved.split(/\s+/) : [];
+    $('.nut-quirk-toggle').each(function () {
+        var id = $(this).data('quirk');
+        if (id && !this.checked && disabled.indexOf(id) === -1) disabled.push(id);
+    });
+    $field.val(disabled.join(' '));
+}
+
+function showQuirkInfo() {
+    var raw = $(this).attr('data-quirk-info');
+    if (!raw) return;
+    var info;
+    try { info = JSON.parse(raw); } catch (e) { return; }
+    var esc = function (s) { return $('<div>').text(s).html(); };
+    var body = '<div class="nut-quirk-modal">'
+        + String(info.details || '').split(/\n\n+/).map(function (p) { return '<p>' + esc(p).replace(/\n/g, '<br>') + '</p>'; }).join('')
+        + (info.directives ? '<p><strong>ups.conf directives:</strong></p><pre>' + esc(info.directives) + '</pre>' : '')
+        + '</div>';
+    if (typeof swal === 'function') {
+        swal({title: info.title || 'Hardware Quirk', text: body, type: 'info', html: true});
+    } else {
+        alert((info.title || 'Hardware Quirk') + '\n\n' + (info.details || '') + (info.directives ? '\n\nups.conf:\n' + info.directives : ''));
+    }
+}
+
 function encData() {
+    syncQuirksDisabled();
     ['MONPASS', 'SLAVEPASS', 'ADMINPASS'].forEach(function (id) {
         $('#' + id).val(nutB64($('#' + id).val()));
     });
@@ -1578,6 +1646,11 @@ $(function() {
         if (!nutValidate($(this))) e.preventDefault();
     });
     $('#btnTestConn').click(TestConnection);
+    $('.nut-quirk-toggle').change(function () {
+        syncQuirksDisabled();
+        $('#QUIRKS_DISABLED').trigger('change');
+    });
+    $('.nut-quirk-info').click(showQuirkInfo);
     // spans/links used as buttons: Enter and Space activate them
     $('[role=button][tabindex]').keydown(function(e) {
         if (e.which === 13 || e.which === 32) { e.preventDefault(); $(this).click(); }
