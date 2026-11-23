@@ -107,6 +107,12 @@ power_is_back() {
     s=" $(timeout "$1" /usr/bin/upsc -- "$UPS" ups.status 2>/dev/null) "
     [[ "$s" == *" OL "* && "$s" != *" OB "* ]]
 }
+# online, not on battery, and not low battery: same fail-safe rules as power_is_back
+lowbatt_cleared() {
+    local s
+    s=" $(timeout "$1" /usr/bin/upsc -- "$UPS" ups.status 2>/dev/null) "
+    [[ "$s" == *" OL "* && "$s" != *" OB "* && "$s" != *" LB "* ]]
+}
 feed_upssched() {
     # upsmon forks notifications asynchronously: ONLINE may have cancelled before this worker started. Verify recovery beside
     # the countdown (never delay it), even without upssched. One stale OL followed by OB must not cancel a real outage.
@@ -280,6 +286,12 @@ then
 
 # for any other status messages the user has configured to be reported
 else
+        # Some UPSes (e.g. APC Back-UPS BX series) briefly flash LB while online; wait 5s and suppress if cleared
+        if [ "$NOTIFYTYPE" == "LOWBATT" ] && power_is_back 5 && { sleep 5; lowbatt_cleared 5; }; then
+            echo "[${UPS}] Transient low battery event cleared while online, suppressing alert." | logger -t "nut-notify[$$]"
+            exit 0
+        fi
+
         echo "[${UPS}] ${1}" | tee >(wall) >(logger -t "nut-notify[$$]")
 
         if [ "$(type -t "$NOTIFYTYPE")" == "function" ]; then

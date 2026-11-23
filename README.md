@@ -35,6 +35,11 @@ Installing it replaces the earlier `nut-dw` plugin (NUT v2, the original or an e
 
 - Unraid 7.3.4 or later.
 
+### Documentation
+
+- [Managed NUT configuration](docs/managed-config.md)
+- [Hardware and driver quirks](docs/hardware-quirks.md)
+
 ### Issues
 
 Report bugs and feature requests in the [issue tracker of this fork](https://github.com/andrebrait/NUT-unRAID/issues).
