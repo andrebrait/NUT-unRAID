@@ -88,7 +88,7 @@ if [ "$NOTIFYTYPE" == "ONLINE" ]; then
     for pid in $(pgrep -f "$WORKER_RE"); do
         [ "$pid" == "$$" ] && continue
         # only cancel ONBATT shutdown workers started by the same UPS (no UPSNAME = legacy, cancel all ONBATT)
-        env=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null)
+        env=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null) || continue
         if grep -qxF "NOTIFYTYPE=ONBATT" <<< "$env" && { [ -z "$UPSNAME" ] || grep -qxF "UPSNAME=${UPSNAME}" <<< "$env"; }; then
             kill -s SIGTERM "$pid" 2>&1 | logger -t "nut-notify[$$]"
         fi

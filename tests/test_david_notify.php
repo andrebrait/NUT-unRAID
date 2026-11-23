@@ -1004,7 +1004,7 @@ $lb = spawn($sb, ["$sb/usr/sbin/nut-notify", 'LOWBATT event'], ['NOTIFYTYPE' => 
 check(wait_for(fn() => substr_count(read_file($sb, 'upsc.targets'), 'ups@127.0.0.1') >= 1, 5),
     'persistent LOWBATT worker started and entered its grace window');
 [$code] = notify_run($sb, 'ONLINE', 'ups@127.0.0.1', [], false);
-check($code === 0, 'concurrent ONLINE exits cleanly');
+check($code === 0 && is_running($lb), 'concurrent ONLINE exits cleanly while LOWBATT worker is still in its grace window');
 check(finish($lb, 12) === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
     'ONLINE does not kill a sleeping LOWBATT worker; persistent OL LB still alerts');
 
