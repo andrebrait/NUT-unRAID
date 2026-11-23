@@ -2,11 +2,16 @@
 
 Some UPS models have firmware quirks that produce false status flags or erratic readings under NUT. NUT v3 maintains a built-in list of hardware- and driver-specific workarounds in `include/nut_quirks.php`.
 
-When a matching UPS and driver/backend are detected, applicable workarounds appear under **NUT Settings → Hardware Quirks**, enabled by default. You can opt out of any workaround individually by unchecking it (and click its info icon to see what it does and which `ups.conf` directives it adds). Any directive you write in **Custom ups.conf (UPS section) Directives** overrides the corresponding quirk directive. Driver options introduced in NUT 2.8.x are skipped on the legacy NUT 2.7.4 backend.
+When a matching UPS and driver/backend are detected, applicable workarounds appear under **NUT Settings → Hardware Quirks**:
+
+- **Exact model matches** are **enabled by default** — uncheck any workaround individually to opt out (`QUIRKS_DISABLED`).
+- **Related / likely matches** are shown as **optional** and **disabled by default** — check any workaround to opt in (`QUIRKS_ENABLED`).
+
+Click any workaround's info icon to see what it does and which `ups.conf` directives it adds. Any directive you write in **Custom ups.conf (UPS section) Directives** overrides the corresponding quirk directive. Driver options introduced in NUT 2.8.x are skipped on the legacy NUT 2.7.4 backend.
 
 ## APC Back-UPS BX series (`BX750MI`, `BX950MI`, `BX1200MI`, `BX1600MI`, `BX2200MI`) — `usbhid-ups`
 
-**Quirk ID:** `apc_bx_mi_lbrb` (matched automatically on `usbhid-ups` with NUT 2.8.x for vendor `051d` and model matching `BX…MI`).
+**Quirk ID:** `apc_bx_mi_lbrb` — enabled by default on `usbhid-ups` (NUT 2.8.x) for vendor `051d` + model matching `BX…MI`; shown as optional for other APC `Back-UPS` models.
 
 **Symptom:** Periodic spurious `LOWBATT` (`LB`) alerts (and occasionally `REPLBATT` (`RB`) or `OL DISCHRG`) while the UPS is online (`OL`) at full charge. Tracked upstream in [networkupstools/nut#2347](https://github.com/networkupstools/nut/issues/2347) and [networkupstools/nut#3623](https://github.com/networkupstools/nut/issues/3623).
 
@@ -28,3 +33,17 @@ If blips on your unit last slightly longer than 4 seconds, override `lbrb_log_de
 ignorelb
 override.battery.charge.low = 20
 ```
+
+## CyberPower UT series (and related CyberPower HID models) — `usbhid-ups`
+
+**Quirk ID:** `cyberpower_ut_onlinedischarge` — enabled by default on `usbhid-ups` (NUT 2.8.x) for vendor `0764` + model matching `UT…`; shown as optional for other CyberPower (`0764`) models.
+
+**Symptom:** Reports `OL+DISCHRG` instead of `OB` when utility power is lost, preventing NUT from treating a real outage as on-battery.
+
+**Directive applied:** `onlinedischarge_onbattery`
+
+## Optional / likely workarounds (disabled by default)
+
+- **`apc_onlinedischarge_calibration`** (`usbhid-ups`, NUT 2.8.x, vendor `051d`): adds `onlinedischarge_calibration` for APC models that emit `OL+DISCHRG` during routine self-tests or calibration.
+- **`cyberpower_pollonly`** (`0764`), **`tripplite_pollonly`** (`09ae`), **`eaton_pollonly`** (`0463`) (`usbhid-ups`, all backends): adds `pollonly` for units experiencing USB interrupt pipe disconnects, `EAGAIN` errors, or stale-data loops.
+- **`usbhid_disable_fix_report_desc`** (`usbhid-ups`, NUT 2.8.x, vendors `051d`, `0764`, `050d`, `10af`): adds `disable_fix_report_desc` if a newer firmware revision fixed a bug that NUT's built-in descriptor fix-up still patches, causing skewed readings.

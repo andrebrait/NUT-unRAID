@@ -9,24 +9,113 @@
  * included in all copies or substantial portions of the Software.
  *
  * Hardware and driver quirk registry: matches known UPS models against the
- * configured driver, backend and detected USB/configured hardware, supplies
- * default ups.conf workarounds (enabled by default, individually opt-out via
- * QUIRKS_DISABLED) and metadata for the settings UI.
+ * configured driver, backend and detected USB/configured hardware. Exact
+ * model matches ('match') are enabled by default (opt-out via QUIRKS_DISABLED);
+ * related/likely matches ('likely_match') are disabled by default (opt-in via
+ * QUIRKS_ENABLED).
  */
+
+const NUT_QUIRK_BACKENDS_28 = ['default', 'preview', 'previous', 'stable'];
+const NUT_QUIRK_BACKENDS_ALL = ['default', 'preview', 'previous', 'stable', 'legacy'];
 
 const NUT_QUIRKS = [
     'apc_bx_mi_lbrb' => [
-        'title'    => 'APC Back-UPS BX...MI: filter spurious LB/RB blips',
-        'details'  => "APC Back-UPS BX-series units (BX750MI, BX950MI, BX1200MI, BX1600MI, BX2200MI) have a known firmware quirk (upstream NUT #2347, #3623) where they briefly flash a false Low Battery (LB) flag over USB HID while online at full charge.\n\nThis workaround adds lbrb_log_delay_sec = 4 and lbrb_log_delay_without_calibrating to ups.conf so usbhid-ups ignores LB (and RB while LB is active) unless it persists for at least 4 seconds.\n\nNotes:\n- A standalone OL RB (Replace Battery without LB) is still reported immediately.\n- With lbrb_log_delay_without_calibrating, a genuine low-battery transition is also delayed by 4 seconds.\n- You can override lbrb_log_delay_sec in Custom ups.conf (UPS section) Directives, or uncheck this workaround to opt out.",
-        'drivers'  => ['usbhid-ups'],
-        'backends' => ['default', 'preview', 'previous', 'stable'],
-        'match'    => [
+        'title'        => 'APC Back-UPS BX...MI: filter spurious LB/RB blips',
+        'details'      => "APC Back-UPS BX-series units (BX750MI, BX950MI, BX1200MI, BX1600MI, BX2200MI) have a known firmware quirk (upstream NUT #2347, #3623) where they briefly flash a false Low Battery (LB) flag over USB HID while online at full charge. Some related APC Back-UPS models (such as BVK/BK/BV series) can show similar blips.\n\nThis workaround adds lbrb_log_delay_sec = 4 and lbrb_log_delay_without_calibrating to ups.conf so usbhid-ups ignores LB (and RB while LB is active) unless it persists for at least 4 seconds.\n\nNotes:\n- A standalone OL RB (Replace Battery without LB) is still reported immediately.\n- With lbrb_log_delay_without_calibrating, a genuine low-battery transition is also delayed by 4 seconds.\n- You can override lbrb_log_delay_sec in Custom ups.conf (UPS section) Directives, or toggle this workaround here.",
+        'drivers'      => ['usbhid-ups'],
+        'backends'     => NUT_QUIRK_BACKENDS_28,
+        'match'        => [
             'vendorid' => ['051d'],
             'model_re' => '/\bBX\d+MI\b/i',
         ],
-        'ups_conf' => [
+        'likely_match' => [
+            'vendorid' => ['051d'],
+            'model_re' => '/\bBack-UPS\b/i',
+        ],
+        'ups_conf'     => [
             'lbrb_log_delay_sec'                 => '4',
             'lbrb_log_delay_without_calibrating' => null,
+        ],
+    ],
+    'apc_onlinedischarge_calibration' => [
+        'title'        => 'APC: treat OL+DISCHRG as calibration',
+        'details'      => "Some APC Back-UPS and Smart-UPS units report OL+DISCHRG (online while discharging) during routine self-tests or battery calibration, which can flood syslog with warnings.\n\nThis workaround adds onlinedischarge_calibration to ups.conf so usbhid-ups recognizes OL+DISCHRG as calibration instead of logging repeated warnings.\n\nOnly enable this if your UPS emits OL+DISCHRG during normal line-power self-tests (not during real power outages).",
+        'drivers'      => ['usbhid-ups'],
+        'backends'     => NUT_QUIRK_BACKENDS_28,
+        'match'        => null,
+        'likely_match' => [
+            'vendorid' => ['051d'],
+        ],
+        'ups_conf'     => [
+            'onlinedischarge_calibration' => null,
+        ],
+    ],
+    'cyberpower_ut_onlinedischarge' => [
+        'title'        => 'CyberPower UT series: treat OL+DISCHRG as on-battery',
+        'details'      => "CyberPower UT-series units (and some related CyberPower USB HID models) report OL+DISCHRG instead of OB when mains power is lost. Without this option, NUT may not treat a real outage as on-battery.\n\nThis workaround adds onlinedischarge_onbattery to ups.conf so usbhid-ups treats OL+DISCHRG as an on-battery state.",
+        'drivers'      => ['usbhid-ups'],
+        'backends'     => NUT_QUIRK_BACKENDS_28,
+        'match'        => [
+            'vendorid' => ['0764'],
+            'model_re' => '/\bUT\d+/i',
+        ],
+        'likely_match' => [
+            'vendorid' => ['0764'],
+        ],
+        'ups_conf'     => [
+            'onlinedischarge_onbattery' => null,
+        ],
+    ],
+    'cyberpower_pollonly' => [
+        'title'        => 'CyberPower: polling-only USB mode (pollonly)',
+        'details'      => "Some CyberPower USB HID models suffer from periodic USB disconnects, stale data, or interrupt pipe errors under usbhid-ups.\n\nThis workaround adds pollonly to ups.conf so usbhid-ups skips USB interrupt transfers and polls on the regular interval instead. Enable this only if you see USB disconnect/reconnect or stale-data loops in syslog.",
+        'drivers'      => ['usbhid-ups'],
+        'backends'     => NUT_QUIRK_BACKENDS_ALL,
+        'match'        => null,
+        'likely_match' => [
+            'vendorid' => ['0764'],
+        ],
+        'ups_conf'     => [
+            'pollonly' => null,
+        ],
+    ],
+    'tripplite_pollonly' => [
+        'title'        => 'Tripp Lite: polling-only USB mode (pollonly)',
+        'details'      => "Some Tripp Lite USB HID units drop off the USB bus or return EAGAIN errors on the USB interrupt endpoint.\n\nThis workaround adds pollonly to ups.conf so usbhid-ups relies on regular polling instead of USB interrupt transfers. Enable this if your Tripp Lite UPS repeatedly logs stale data or USB communication errors.",
+        'drivers'      => ['usbhid-ups'],
+        'backends'     => NUT_QUIRK_BACKENDS_ALL,
+        'match'        => null,
+        'likely_match' => [
+            'vendorid' => ['09ae'],
+        ],
+        'ups_conf'     => [
+            'pollonly' => null,
+        ],
+    ],
+    'eaton_pollonly' => [
+        'title'        => 'Eaton / MGE: polling-only USB mode (pollonly)',
+        'details'      => "Most Eaton / MGE USB HID units work cleanly with interrupt transfers, but some setups experience USB interrupt pipe drops or stale-data warnings after power state transitions.\n\nThis workaround adds pollonly to ups.conf so usbhid-ups relies on regular polling instead of USB interrupt transfers. Leave this off unless you see recurring USB interrupt or stale-data errors.",
+        'drivers'      => ['usbhid-ups'],
+        'backends'     => NUT_QUIRK_BACKENDS_ALL,
+        'match'        => null,
+        'likely_match' => [
+            'vendorid' => ['0463'],
+        ],
+        'ups_conf'     => [
+            'pollonly' => null,
+        ],
+    ],
+    'usbhid_disable_fix_report_desc' => [
+        'title'        => 'Disable USB HID report descriptor fix-ups',
+        'details'      => "NUT applies built-in report descriptor fix-ups for certain APC, CyberPower, Belkin, and Liebert USB HID models with known firmware bugs. If a newer hardware revision or firmware update fixed the bug, NUT's fix-up can cause incorrect voltage or battery readings.\n\nThis workaround adds disable_fix_report_desc to ups.conf so usbhid-ups uses the raw USB HID report descriptor as-is. Leave this off unless your readings look clearly scaled wrong.",
+        'drivers'      => ['usbhid-ups'],
+        'backends'     => NUT_QUIRK_BACKENDS_28,
+        'match'        => null,
+        'likely_match' => [
+            'vendorid' => ['051d', '0764', '050d', '10af'],
+        ],
+        'ups_conf'     => [
+            'disable_fix_report_desc' => null,
         ],
     ],
 ];
@@ -106,11 +195,19 @@ function nut_quirk_detect_devices(array $c, ?array $usbDevices = null) {
     return $candidates;
 }
 
-/* Disabled quirk IDs stored in QUIRKS_DISABLED. */
-function nut_quirks_disabled(array $c) {
-    $raw = trim((string)($c['QUIRKS_DISABLED'] ?? ''));
+/* Parse a space/comma-separated quirk ID list setting. */
+function nut_quirk_id_list(array $c, $key) {
+    $raw = trim((string)($c[$key] ?? ''));
     if ($raw === '') return [];
     return array_values(array_unique(array_filter(preg_split('/[\s,]+/', $raw), 'strlen')));
+}
+
+function nut_quirks_disabled(array $c) {
+    return nut_quirk_id_list($c, 'QUIRKS_DISABLED');
+}
+
+function nut_quirks_enabled(array $c) {
+    return nut_quirk_id_list($c, 'QUIRKS_ENABLED');
 }
 
 function nut_quirk_matches_device(array $match, array $dev) {
@@ -120,7 +217,8 @@ function nut_quirk_matches_device(array $match, array $dev) {
     return true;
 }
 
-/* Quirks applicable to the current configuration's mode, driver, backend and detected hardware. */
+/* Quirks applicable to the current configuration's mode, driver, backend and detected hardware.
+ * Exact matches ('match') carry default_on=true; related matches ('likely_match') carry default_on=false. */
 function nut_quirks_matching(array $c, ?array $usbDevices = null) {
     if (($c['MODE'] ?? '') === 'slave') return [];
     $driver = ($c['DRIVER'] ?? '') === 'custom' ? ($c['SERIAL'] ?? '') : ($c['DRIVER'] ?? '');
@@ -131,20 +229,34 @@ function nut_quirks_matching(array $c, ?array $usbDevices = null) {
     foreach (NUT_QUIRKS as $id => $q) {
         if (!in_array($driver, $q['drivers'], true)) continue;
         if (!in_array($backend, $q['backends'], true)) continue;
+        $exact = false;
+        $likely = false;
         foreach ($devices as $dev) {
-            if (nut_quirk_matches_device($q['match'], $dev)) {
-                $matched[$id] = $q;
+            if (!empty($q['match']) && nut_quirk_matches_device($q['match'], $dev)) {
+                $exact = true;
                 break;
             }
+            if (!empty($q['likely_match']) && nut_quirk_matches_device($q['likely_match'], $dev)) {
+                $likely = true;
+            }
+        }
+        if ($exact || $likely) {
+            $matched[$id] = $q + ['default_on' => $exact];
         }
     }
     return $matched;
 }
 
-/* Matching quirks that the user has not opted out of. */
+/* Matching quirks currently enabled: exact matches unless opted out, likely matches only if opted in. */
 function nut_quirks_active(array $c, ?array $usbDevices = null) {
     $disabled = array_flip(nut_quirks_disabled($c));
-    return array_filter(nut_quirks_matching($c, $usbDevices), fn($id) => !isset($disabled[$id]), ARRAY_FILTER_USE_KEY);
+    $enabled = array_flip(nut_quirks_enabled($c));
+    $active = [];
+    foreach (nut_quirks_matching($c, $usbDevices) as $id => $q) {
+        $on = $q['default_on'] ? !isset($disabled[$id]) : isset($enabled[$id]);
+        if ($on) $active[$id] = $q;
+    }
+    return $active;
 }
 
 /* Lowercased ups.conf directive keys emitted by active quirks (replaceable by CUSTOM_UPS). */

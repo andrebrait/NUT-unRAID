@@ -515,9 +515,14 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             <?
             $nut_matching_quirks = nut_quirks_matching($nut_mc);
             $nut_disabled_quirks = nut_quirks_disabled($nut_mc);
-            $nut_preserved_quirks = array_values(array_diff($nut_disabled_quirks, array_keys($nut_matching_quirks)));
+            $nut_enabled_quirks = nut_quirks_enabled($nut_mc);
+            $nut_exact_ids = array_keys(array_filter($nut_matching_quirks, fn($q) => $q['default_on']));
+            $nut_likely_ids = array_keys(array_filter($nut_matching_quirks, fn($q) => !$q['default_on']));
+            $nut_preserved_disabled = array_values(array_diff($nut_disabled_quirks, $nut_exact_ids));
+            $nut_preserved_enabled = array_values(array_diff($nut_enabled_quirks, $nut_likely_ids));
             ?>
-            <input type="hidden" class="nut-run" id="QUIRKS_DISABLED" name="QUIRKS_DISABLED" value="<?=htmlspecialchars($nut_mc['QUIRKS_DISABLED'] ?? '', ENT_QUOTES)?>" data-preserved="<?=htmlspecialchars(implode(' ', $nut_preserved_quirks), ENT_QUOTES)?>">
+            <input type="hidden" class="nut-run" id="QUIRKS_DISABLED" name="QUIRKS_DISABLED" value="<?=htmlspecialchars($nut_mc['QUIRKS_DISABLED'] ?? '', ENT_QUOTES)?>" data-preserved="<?=htmlspecialchars(implode(' ', $nut_preserved_disabled), ENT_QUOTES)?>">
+            <input type="hidden" class="nut-run" id="QUIRKS_ENABLED" name="QUIRKS_ENABLED" value="<?=htmlspecialchars($nut_mc['QUIRKS_ENABLED'] ?? '', ENT_QUOTES)?>" data-preserved="<?=htmlspecialchars(implode(' ', $nut_preserved_enabled), ENT_QUOTES)?>">
             <dl id="NUT_QUIRKS">
                 <dt>Hardware Quirks:</dt>
                 <dd>
@@ -526,7 +531,8 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                     <?else:?>
                         <div class="nut-quirks-list">
                         <?foreach ($nut_matching_quirks as $nut_qid => $nut_q):
-                            $nut_q_enabled = !in_array($nut_qid, $nut_disabled_quirks, true);
+                            $nut_q_def = !empty($nut_q['default_on']);
+                            $nut_q_checked = $nut_q_def ? !in_array($nut_qid, $nut_disabled_quirks, true) : in_array($nut_qid, $nut_enabled_quirks, true);
                             $nut_q_modal = htmlspecialchars(json_encode([
                                 'title'      => $nut_q['title'],
                                 'details'    => $nut_q['details'],
@@ -535,9 +541,10 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                         ?>
                             <div class="nut-quirk-item">
                                 <label>
-                                    <input type="checkbox" class="nut-run nut-quirk-toggle" data-quirk="<?=htmlspecialchars($nut_qid, ENT_QUOTES)?>" <?=$nut_q_enabled ? 'checked' : ''?>>
+                                    <input type="checkbox" class="nut-run nut-quirk-toggle" data-quirk="<?=htmlspecialchars($nut_qid, ENT_QUOTES)?>" data-default-on="<?=$nut_q_def ? '1' : '0'?>" <?=$nut_q_checked ? 'checked' : ''?>>
                                     <?=htmlspecialchars($nut_q['title'])?>
                                 </label>
+                                <?if (!$nut_q_def):?><span class="nut-quirk-tag" title="Likely workaround for a related UPS model; disabled by default">optional</span><?endif;?>
                                 <span class="nut-quirk-info nut-pointer" role="button" tabindex="0" title="About this workaround" aria-label="About <?=htmlspecialchars($nut_q['title'], ENT_QUOTES)?>" data-quirk-info="<?=$nut_q_modal?>"><i class="fa fa-info-circle"></i></span>
                             </div>
                         <?endforeach;?>
@@ -546,7 +553,7 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
                 </dd>
             </dl>
             <blockquote class="inline_help">
-                <p>Hardware- and driver-specific workarounds detected for your UPS are enabled by default. Uncheck any workaround individually to opt out, or click its <i class="fa fa-info-circle"></i> icon to see what it does and which directives it adds to <strong><em>ups.conf</em></strong>.</p>
+                <p>Hardware- and driver-specific workarounds for exact model matches are enabled by default (uncheck any workaround individually to opt out). Likely workarounds for related models are shown as <strong><em>optional</em></strong> and disabled by default (check to opt in). Click any <i class="fa fa-info-circle"></i> icon to see what it does and which directives it adds to <strong><em>ups.conf</em></strong>.</p>
                 <p>Any directive set in <strong><em>Custom ups.conf (UPS section) Directives</em></strong> below overrides the corresponding quirk directive.</p>
             </blockquote>
 
@@ -1436,15 +1443,22 @@ function decData() {
 }
 
 function syncQuirksDisabled() {
-    var $field = $('#QUIRKS_DISABLED');
-    if (!$field.length) return;
-    var preserved = ($field.attr('data-preserved') || '').trim();
-    var disabled = preserved ? preserved.split(/\s+/) : [];
+    var $dis = $('#QUIRKS_DISABLED');
+    var $ena = $('#QUIRKS_ENABLED');
+    if (!$dis.length && !$ena.length) return;
+    var pDis = ($dis.attr('data-preserved') || '').trim();
+    var pEna = ($ena.attr('data-preserved') || '').trim();
+    var disabled = pDis ? pDis.split(/\s+/) : [];
+    var enabled = pEna ? pEna.split(/\s+/) : [];
     $('.nut-quirk-toggle').each(function () {
         var id = $(this).data('quirk');
-        if (id && !this.checked && disabled.indexOf(id) === -1) disabled.push(id);
+        if (!id) return;
+        var defOn = $(this).attr('data-default-on') === '1';
+        if (defOn && !this.checked && disabled.indexOf(id) === -1) disabled.push(id);
+        if (!defOn && this.checked && enabled.indexOf(id) === -1) enabled.push(id);
     });
-    $field.val(disabled.join(' '));
+    $dis.val(disabled.join(' '));
+    $ena.val(enabled.join(' '));
 }
 
 function showQuirkInfo() {
@@ -1648,7 +1662,7 @@ $(function() {
     $('#btnTestConn').click(TestConnection);
     $('.nut-quirk-toggle').change(function () {
         syncQuirksDisabled();
-        $('#QUIRKS_DISABLED').trigger('change');
+        $('#QUIRKS_DISABLED, #QUIRKS_ENABLED').trigger('change');
     });
     $('.nut-quirk-info').click(showQuirkInfo);
     // spans/links used as buttons: Enter and Space activate them
