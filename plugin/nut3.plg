@@ -22,7 +22,7 @@
 ## Network UPS Tools (NUT) v3
 ###2026.11.23
 - Suppress transient online LOWBATT alerts that clear within 5 seconds while the UPS stays online (OL), and scope ONLINE worker cancellation to ONBATT workers so a concurrent ONLINE cannot drop a persistent LOWBATT alert.
-- Add a Hardware Quirks section under NUT Settings (UPS & Driver) with per-workaround toggles and info modals: exact model matches (APC Back-UPS BX...MI LB/RB blip filter, CyberPower UT series OL+DISCHRG handling) are enabled by default with individual opt-out, while likely workarounds for related models (APC calibration OL+DISCHRG, CyberPower/Tripp Lite/Eaton pollonly, and USB HID report descriptor fix-up opt-out) are shown as optional and disabled by default.
+- Add a Hardware Quirks section under NUT Settings (UPS &amp; Driver) with per-workaround toggles and info modals: exact model matches (APC Back-UPS BX...MI LB/RB blip filter, CyberPower UT series OL+DISCHRG handling) are enabled by default with individual opt-out, while likely workarounds for related models (APC calibration OL+DISCHRG, CyberPower/Tripp Lite/Eaton pollonly, and USB HID report descriptor fix-up opt-out) are shown as optional and disabled by default.
 - Document hardware and driver quirks in docs/hardware-quirks.md.
 ###2026.11.22
 - Retry upsd in the background when a listen address is missing or its name does not resolve at startup, such as a Tailscale address that comes up after NUT. One alert follows if upsd still cannot start five minutes after the webGUI is up, and a notice once it does.
