@@ -48,6 +48,10 @@ delayed alerts are disabled. A single online reading followed by on-battery stat
 If the entire recovery window is missed, NUT's notification data cannot identify which outage a late worker
 belongs to; the plugin retains shutdown protection rather than discarding an ambiguous on-battery event.
 
+Likewise, `LOWBATT` events received while the UPS is online (`OL`, not `OB`) wait 5 seconds and re-check
+`ups.status`; if `LB` has cleared and the UPS is still online, the Unraid alert and `LOWBATT` hook are
+suppressed as a transient blip. Real `OB LB` events and persistent `OL LB` conditions still alert normally.
+
 upsmon roles stay `master`/`slave`. NUT 2.8.x also accepts `primary`/`secondary`, but the still-offered
 legacy 2.7.4 backend accepts only the old words, and 2.8.x prints no deprecation warning for them.
 

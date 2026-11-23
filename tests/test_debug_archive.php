@@ -17,7 +17,7 @@ try {
     $dest = "$root/usr/local/emhttp/plugins/nut3";
     mkdir("$dest/scripts", 0700, true);
     mkdir("$dest/include", 0700, true);
-    foreach (['include/nut_redact.php', 'include/nut_managed.php', 'scripts/debug_redact', 'default.cfg'] as $file) {
+    foreach (['include/nut_redact.php', 'include/nut_managed.php', 'include/nut_quirks.php', 'scripts/debug_redact', 'default.cfg'] as $file) {
         if (is_file("$plugin/$file")) copy("$plugin/$file", "$dest/$file");
     }
     $secret = 'custom/archive^hidden';

@@ -973,6 +973,81 @@ check(!in_array('FSD', events($sb), true), 'the stopped worker never sets FSD');
 proc_terminate($decoy, 15);
 finish($decoy, 5);
 
+// ================= nut-notify: transient LOWBATT while online is suppressed; real/persistent LOWBATT alerts
+$sb = sb_new('lowbatt-transient');
+file_put_contents("$sb/etc/nut/xnut-notify-hooks.sh", "LOWBATT() { echo ran > \"\$SB/lowbatt-hook\"; }\n");
+file_put_contents("$sb/upsc.seq.ups.status", "OL LB\nOL\n");
+[$code] = notify_run($sb, 'LOWBATT');
+check($code === 0, 'transient LOWBATT exits cleanly');
+check(read_file($sb, 'notify.calls') === '' && read_file($sb, 'wall') === '' && !file_exists("$sb/lowbatt-hook"),
+    'transient OL LB -> OL suppresses OS alert, wall and LOWBATT hook');
+check(log_count($sb, 'Transient low battery event cleared while online, suppressing alert.') === 1,
+    'transient LOWBATT suppression is logged');
+
+$sb = sb_new('lowbatt-already-ol');
+file_put_contents("$sb/upsc.seq.ups.status", "OL CHRG\nOL\n");
+[$code] = notify_run($sb, 'LOWBATT');
+check($code === 0 && read_file($sb, 'notify.calls') === '' && log_count($sb, 'Transient low battery event cleared') === 1,
+    'already-cleared OL LOWBATT is suppressed after confirming OL without LB');
+check(substr_count(read_file($sb, 'upsc.targets'), 'ups@127.0.0.1') === 2,
+    'already-cleared OL LOWBATT still waits for the second upsc poll');
+
+$sb = sb_new('lowbatt-ambiguous-second-poll');
+file_put_contents("$sb/upsc.seq.ups.status", "OL LB\nOL OB\n");
+[$code] = notify_run($sb, 'LOWBATT');
+check($code === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
+    'ambiguous OL OB status on the LOWBATT re-check fails safe and alerts');
+
+$sb = sb_new('lowbatt-survives-online');
+file_put_contents("$sb/upsc.seq.ups.status", "OL LB\nOL LB\n");
+$lb = spawn($sb, ["$sb/usr/sbin/nut-notify", 'LOWBATT event'], ['NOTIFYTYPE' => 'LOWBATT', 'UPSNAME' => 'ups@127.0.0.1'], 'lb');
+check(wait_for(fn() => substr_count(read_file($sb, 'upsc.targets'), 'ups@127.0.0.1') >= 1, 5),
+    'persistent LOWBATT worker started and entered its grace window');
+[$code] = notify_run($sb, 'ONLINE', 'ups@127.0.0.1', [], false);
+check($code === 0 && is_running($lb), 'concurrent ONLINE exits cleanly while LOWBATT worker is still in its grace window');
+check(finish($lb, 12) === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
+    'ONLINE does not kill a sleeping LOWBATT worker; persistent OL LB still alerts');
+
+$sb = sb_new('lowbatt-persistent-ol');
+file_put_contents("$sb/etc/nut/xnut-notify-hooks.sh", "LOWBATT() { echo ran > \"\$SB/lowbatt-hook\"; }\n");
+file_put_contents("$sb/upsc.seq.ups.status", "OL LB\nOL LB\n");
+[$code] = notify_run($sb, 'LOWBATT');
+check($code === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
+    'persistent OL LB still sends the LOWBATT alert');
+check(wait_for(fn() => file_exists("$sb/lowbatt-hook") && strpos(read_file($sb, 'wall'), 'LOWBATT event') !== false, 5),
+    'persistent OL LB still runs the LOWBATT hook and wall');
+
+$sb = sb_new('lowbatt-ob');
+file_put_contents("$sb/upsc.ups.status", "OB LB\n");
+[$code] = notify_run($sb, 'LOWBATT');
+check($code === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
+    'OB LB sends the LOWBATT alert');
+check(substr_count(read_file($sb, 'upsc.targets'), 'ups@127.0.0.1') === 1,
+    'OB LB alerts immediately without a second poll');
+
+$sb = sb_new('lowbatt-becomes-ob');
+file_put_contents("$sb/upsc.seq.ups.status", "OL LB\nOB LB\n");
+[$code] = notify_run($sb, 'LOWBATT');
+check($code === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
+    'OL LB that transitions to OB LB during the grace window still alerts');
+
+$sb = sb_new('lowbatt-no-data');
+[$code] = notify_run($sb, 'LOWBATT');
+check($code === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
+    'missing upsc status on LOWBATT fails safe and alerts');
+
+$sb = sb_new('lowbatt-second-poll-no-data');
+file_put_contents("$sb/upsc.seq.ups.status", "OL LB\n\n");
+[$code] = notify_run($sb, 'LOWBATT');
+check($code === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
+    'missing upsc status on the LOWBATT re-check fails safe and alerts');
+
+$sb = sb_new('generic-event-no-poll');
+file_put_contents("$sb/upsc.ups.status", "OL\n");
+[$code] = notify_run($sb, 'FSD');
+check($code === 0 && strpos(read_file($sb, 'notify.calls'), 'Event FSD') !== false && !file_exists("$sb/upsc.targets"),
+    'other generic events alert immediately without polling upsc');
+
 if ($failures) {
     fwrite(STDERR, "$failures check(s) failed.\n");
     exit(1);

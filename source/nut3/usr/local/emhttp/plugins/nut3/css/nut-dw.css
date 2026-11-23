@@ -80,6 +80,15 @@ textarea.nut-custom { width: 100%; max-width: 640px; box-sizing: border-box; fon
 #nut_testconn_result .nut-fail:before { content: "\2718\00a0"; }
 #nut_testconn_result .nut-fail { color: var(--nut-error); }
 #nut_testconn_result .nut-note { color: var(--nut-muted); }
+.nut-muted { color: var(--nut-muted); }
+.nut-quirks-list { display: flex; flex-direction: column; gap: 6px; }
+.nut-quirk-item { display: flex; align-items: center; gap: 8px; }
+.nut-quirk-item label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: normal; cursor: pointer; }
+.nut-quirk-info { color: var(--nut-muted); font-size: 1.05em; }
+.nut-quirk-info:hover, .nut-quirk-info:focus-visible { color: inherit; }
+.nut-quirk-modal { text-align: left; }
+.nut-quirk-modal p { margin: 0 0 8px; }
+.nut-quirk-modal pre { margin: 10px 0 0; padding: 8px 10px; border: 1px solid var(--nut-border); border-radius: 4px; overflow-x: auto; font-family: monospace; }
 
 @media (max-width: 768px) {
   form#nut-settings dl > dt, form#nut-display dl > dt { float: none; width: auto; text-align: left; margin-bottom: 4px; }
