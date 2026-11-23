@@ -3,14 +3,14 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name      "nut3">
 <!ENTITY author    "andrebrait">
-<!ENTITY version   "2026.11.22">
+<!ENTITY version   "2026.11.23">
 <!ENTITY launch    "Settings/NUTsettings">
 <!ENTITY gitURL    "https://raw.githubusercontent.com/andrebrait/NUT-unRAID/master">
 <!ENTITY pluginURL "&gitURL;/plugin/&name;.plg">
 <!ENTITY pkgURL    "&gitURL;/packages">
 <!ENTITY plgPATH   "/boot/config/plugins/&name;">
-<!ENTITY plgNAME   "nut-plugin-2026.11.22-x86_64-1">
-<!ENTITY plgMD5    "772454e26d9ca25dd92b575e706142c3">
+<!ENTITY plgNAME   "nut-plugin-2026.11.23-x86_64-1">
+<!ENTITY plgMD5    "d19bf7e6d657ae763c6041ba51dce078">
 <!ENTITY nutNAME   "nut-2.8.5.1711_g1c4ab78c6-x86_64-2_andrebrait">
 <!ENTITY nutMD5    "c9109f45b7240ed720aa22143cd1e3f9">
 <!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
@@ -20,6 +20,10 @@
 
 <CHANGES>
 ## Network UPS Tools (NUT) v3
+###2026.11.23
+- Suppress transient online LOWBATT alerts that clear within 5 seconds while the UPS stays online (OL), and scope ONLINE worker cancellation to ONBATT workers so a concurrent ONLINE cannot drop a persistent LOWBATT alert.
+- Add a Hardware Quirks section under NUT Settings (UPS & Driver) with per-workaround toggles and info modals: exact model matches (APC Back-UPS BX...MI LB/RB blip filter, CyberPower UT series OL+DISCHRG handling) are enabled by default with individual opt-out, while likely workarounds for related models (APC calibration OL+DISCHRG, CyberPower/Tripp Lite/Eaton pollonly, and USB HID report descriptor fix-up opt-out) are shown as optional and disabled by default.
+- Document hardware and driver quirks in docs/hardware-quirks.md.
 ###2026.11.22
 - Retry upsd in the background when a listen address is missing or its name does not resolve at startup, such as a Tailscale address that comes up after NUT. One alert follows if upsd still cannot start five minutes after the webGUI is up, and a notice once it does.
 - List slaves that log in from 127.0.0.1, such as remote monitors forwarded by tailscale serve, as "127.0.0.1 (local or forwarded)" instead of hiding them with the local upsmon. An IPv6 server address no longer lists the local upsmon as a slave.
