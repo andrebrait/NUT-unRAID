@@ -989,6 +989,24 @@ file_put_contents("$sb/upsc.seq.ups.status", "OL CHRG\nOL\n");
 [$code] = notify_run($sb, 'LOWBATT');
 check($code === 0 && read_file($sb, 'notify.calls') === '' && log_count($sb, 'Transient low battery event cleared') === 1,
     'already-cleared OL LOWBATT is suppressed after confirming OL without LB');
+check(substr_count(read_file($sb, 'upsc.targets'), 'ups@127.0.0.1') === 2,
+    'already-cleared OL LOWBATT still waits for the second upsc poll');
+
+$sb = sb_new('lowbatt-ambiguous-second-poll');
+file_put_contents("$sb/upsc.seq.ups.status", "OL LB\nOL OB\n");
+[$code] = notify_run($sb, 'LOWBATT');
+check($code === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
+    'ambiguous OL OB status on the LOWBATT re-check fails safe and alerts');
+
+$sb = sb_new('lowbatt-survives-online');
+file_put_contents("$sb/upsc.seq.ups.status", "OL LB\nOL LB\n");
+$lb = spawn($sb, ["$sb/usr/sbin/nut-notify", 'LOWBATT event'], ['NOTIFYTYPE' => 'LOWBATT', 'UPSNAME' => 'ups@127.0.0.1'], 'lb');
+check(wait_for(fn() => substr_count(read_file($sb, 'upsc.targets'), 'ups@127.0.0.1') >= 1, 5),
+    'persistent LOWBATT worker started and entered its grace window');
+[$code] = notify_run($sb, 'ONLINE', 'ups@127.0.0.1', [], false);
+check($code === 0, 'concurrent ONLINE exits cleanly');
+check(finish($lb, 12) === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
+    'ONLINE does not kill a sleeping LOWBATT worker; persistent OL LB still alerts');
 
 $sb = sb_new('lowbatt-persistent-ol');
 file_put_contents("$sb/etc/nut/xnut-notify-hooks.sh", "LOWBATT() { echo ran > \"\$SB/lowbatt-hook\"; }\n");
