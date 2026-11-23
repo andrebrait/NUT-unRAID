@@ -80,16 +80,16 @@ check(array_keys(nut_quirks_active($defaults, $cyberUtUsb)) === ['cyberpower_ut_
     'CyberPower UT1500E activates only its exact quirk by default');
 $mCp = nut_quirks_matching($defaults, $cyberCpUsb);
 check(isset($mCp['cyberpower_ut_onlinedischarge']) && $mCp['cyberpower_ut_onlinedischarge']['default_on'] === false
-    && isset($mCp['cyberpower_pollonly']) && $mCp['cyberpower_pollonly']['default_on'] === false,
+    && isset($mCp['usbhid_pollonly']) && $mCp['usbhid_pollonly']['default_on'] === false,
     'CyberPower CP1500PFCLCD offers UT and pollonly quirks as optional');
 check(nut_quirks_active($defaults, $cyberCpUsb) === [], 'CyberPower CP1500PFCLCD has no active quirks by default');
 
 $mEaton = nut_quirks_matching($defaults, $eatonUsb);
-check(array_keys($mEaton) === ['eaton_pollonly'] && $mEaton['eaton_pollonly']['default_on'] === false,
-    'Eaton Ellipse ECO offers eaton_pollonly as optional (default_on=false)');
+check(array_keys($mEaton) === ['usbhid_pollonly'] && $mEaton['usbhid_pollonly']['default_on'] === false,
+    'Eaton Ellipse ECO offers usbhid_pollonly as optional (default_on=false)');
 $mTripp = nut_quirks_matching($defaults, $trippUsb);
-check(array_keys($mTripp) === ['tripplite_pollonly'] && $mTripp['tripplite_pollonly']['default_on'] === false,
-    'Tripp Lite offers tripplite_pollonly as optional (default_on=false)');
+check(array_keys($mTripp) === ['usbhid_pollonly'] && $mTripp['usbhid_pollonly']['default_on'] === false,
+    'Tripp Lite offers usbhid_pollonly as optional (default_on=false)');
 check(nut_quirks_matching($defaults, $unknownUsb) === [], 'unknown vendor matches no quirks');
 
 // 6. Matching via CUSTOM_UPS product (Auto Config) even with no USB sysfs devices
@@ -115,7 +115,7 @@ check(isset($mPinProd['apc_bx_mi_lbrb']) && $mPinProd['apc_bx_mi_lbrb']['default
 // 8. Driver, backend, and slave mode gating
 check(nut_quirks_matching(array_merge($defaults, ['DRIVER' => 'nutdrv_qx']), $bxUsb) === [], 'wrong driver does not match');
 check(nut_quirks_matching(array_merge($defaults, ['BACKEND' => 'legacy']), $bxUsb) === [], 'legacy 2.7.4 backend skips NUT 2.8.x APC quirks');
-check(array_keys(nut_quirks_matching(array_merge($defaults, ['BACKEND' => 'legacy']), $eatonUsb)) === ['eaton_pollonly'],
+check(array_keys(nut_quirks_matching(array_merge($defaults, ['BACKEND' => 'legacy']), $eatonUsb)) === ['usbhid_pollonly'],
     'legacy 2.7.4 backend still allows 2.7.4-compatible pollonly quirk');
 check(isset(nut_quirks_matching(array_merge($defaults, ['BACKEND' => 'stable']), $bxUsb)['apc_bx_mi_lbrb']), 'stable 2.8.3 backend matches');
 check(nut_quirks_matching(array_merge($defaults, ['MODE' => 'slave']), $bxUsb) === [], 'slave mode matches no driver quirks');
@@ -146,7 +146,7 @@ check(strpos($genOv['ups.conf'], 'lbrb_log_delay_sec = 4') === false
 
 // 11. Settings UI includes per-workaround toggles, optional tags, and info modal triggers
 $page = file_get_contents(__DIR__ . '/../source/nut3/usr/local/emhttp/plugins/nut3/NUTsettings.page');
-foreach (['id="NUT_QUIRKS"', 'id="QUIRKS_DISABLED"', 'id="QUIRKS_ENABLED"', 'data-default-on=', 'nut-quirk-tag', 'nut-quirk-toggle', 'nut-quirk-info', 'showQuirkInfo', 'syncQuirksDisabled'] as $needle) {
+foreach (['id="NUT_QUIRKS"', 'id="QUIRKS_DISABLED"', 'id="QUIRKS_ENABLED"', 'data-default-on=', 'nut-quirk-tag', 'nut-quirk-toggle', 'nut-quirk-info', 'showQuirkInfo', 'syncQuirks'] as $needle) {
     check(strpos($page, $needle) !== false, "NUTsettings.page contains $needle");
 }
 

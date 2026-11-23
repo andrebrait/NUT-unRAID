@@ -16,7 +16,6 @@
  */
 
 const NUT_QUIRK_BACKENDS_28 = ['default', 'preview', 'previous', 'stable'];
-const NUT_QUIRK_BACKENDS_ALL = ['default', 'preview', 'previous', 'stable', 'legacy'];
 
 const NUT_QUIRKS = [
     'apc_bx_mi_lbrb' => [
@@ -66,40 +65,14 @@ const NUT_QUIRKS = [
             'onlinedischarge_onbattery' => null,
         ],
     ],
-    'cyberpower_pollonly' => [
-        'title'        => 'CyberPower: polling-only USB mode (pollonly)',
-        'details'      => "Some CyberPower USB HID models suffer from periodic USB disconnects, stale data, or interrupt pipe errors under usbhid-ups.\n\nThis workaround adds pollonly to ups.conf so usbhid-ups skips USB interrupt transfers and polls on the regular interval instead. Enable this only if you see USB disconnect/reconnect or stale-data loops in syslog.",
+    'usbhid_pollonly' => [
+        'title'        => 'USB HID: polling-only mode (pollonly)',
+        'details'      => "Some CyberPower, Tripp Lite, and Eaton / MGE USB HID units suffer from periodic USB disconnects, EAGAIN errors, or stale-data loops on the USB interrupt endpoint under usbhid-ups.\n\nThis workaround adds pollonly to ups.conf so usbhid-ups skips USB interrupt transfers and polls on the regular interval instead. Leave this off unless you see recurring USB interrupt or stale-data errors in syslog.",
         'drivers'      => ['usbhid-ups'],
-        'backends'     => NUT_QUIRK_BACKENDS_ALL,
+        'backends'     => null,
         'match'        => null,
         'likely_match' => [
-            'vendorid' => ['0764'],
-        ],
-        'ups_conf'     => [
-            'pollonly' => null,
-        ],
-    ],
-    'tripplite_pollonly' => [
-        'title'        => 'Tripp Lite: polling-only USB mode (pollonly)',
-        'details'      => "Some Tripp Lite USB HID units drop off the USB bus or return EAGAIN errors on the USB interrupt endpoint.\n\nThis workaround adds pollonly to ups.conf so usbhid-ups relies on regular polling instead of USB interrupt transfers. Enable this if your Tripp Lite UPS repeatedly logs stale data or USB communication errors.",
-        'drivers'      => ['usbhid-ups'],
-        'backends'     => NUT_QUIRK_BACKENDS_ALL,
-        'match'        => null,
-        'likely_match' => [
-            'vendorid' => ['09ae'],
-        ],
-        'ups_conf'     => [
-            'pollonly' => null,
-        ],
-    ],
-    'eaton_pollonly' => [
-        'title'        => 'Eaton / MGE: polling-only USB mode (pollonly)',
-        'details'      => "Most Eaton / MGE USB HID units work cleanly with interrupt transfers, but some setups experience USB interrupt pipe drops or stale-data warnings after power state transitions.\n\nThis workaround adds pollonly to ups.conf so usbhid-ups relies on regular polling instead of USB interrupt transfers. Leave this off unless you see recurring USB interrupt or stale-data errors.",
-        'drivers'      => ['usbhid-ups'],
-        'backends'     => NUT_QUIRK_BACKENDS_ALL,
-        'match'        => null,
-        'likely_match' => [
-            'vendorid' => ['0463'],
+            'vendorid' => ['0764', '09ae', '0463'],
         ],
         'ups_conf'     => [
             'pollonly' => null,
@@ -228,7 +201,7 @@ function nut_quirks_matching(array $c, ?array $usbDevices = null) {
     $matched = [];
     foreach (NUT_QUIRKS as $id => $q) {
         if (!in_array($driver, $q['drivers'], true)) continue;
-        if (!in_array($backend, $q['backends'], true)) continue;
+        if ($q['backends'] !== null && !in_array($backend, $q['backends'], true)) continue;
         $exact = false;
         $likely = false;
         foreach ($devices as $dev) {

@@ -516,10 +516,9 @@ if (file_exists('/usr/local/emhttp/plugins/nut3/misc/start-failed')) {
             $nut_matching_quirks = nut_quirks_matching($nut_mc);
             $nut_disabled_quirks = nut_quirks_disabled($nut_mc);
             $nut_enabled_quirks = nut_quirks_enabled($nut_mc);
-            $nut_exact_ids = array_keys(array_filter($nut_matching_quirks, fn($q) => $q['default_on']));
-            $nut_likely_ids = array_keys(array_filter($nut_matching_quirks, fn($q) => !$q['default_on']));
-            $nut_preserved_disabled = array_values(array_diff($nut_disabled_quirks, $nut_exact_ids));
-            $nut_preserved_enabled = array_values(array_diff($nut_enabled_quirks, $nut_likely_ids));
+            $nut_rendered_ids = array_keys($nut_matching_quirks);
+            $nut_preserved_disabled = array_values(array_diff($nut_disabled_quirks, $nut_rendered_ids));
+            $nut_preserved_enabled = array_values(array_diff($nut_enabled_quirks, $nut_rendered_ids));
             ?>
             <input type="hidden" class="nut-run" id="QUIRKS_DISABLED" name="QUIRKS_DISABLED" value="<?=htmlspecialchars($nut_mc['QUIRKS_DISABLED'] ?? '', ENT_QUOTES)?>" data-preserved="<?=htmlspecialchars(implode(' ', $nut_preserved_disabled), ENT_QUOTES)?>">
             <input type="hidden" class="nut-run" id="QUIRKS_ENABLED" name="QUIRKS_ENABLED" value="<?=htmlspecialchars($nut_mc['QUIRKS_ENABLED'] ?? '', ENT_QUOTES)?>" data-preserved="<?=htmlspecialchars(implode(' ', $nut_preserved_enabled), ENT_QUOTES)?>">
@@ -1442,7 +1441,7 @@ function decData() {
     });
 }
 
-function syncQuirksDisabled() {
+function syncQuirks() {
     var $dis = $('#QUIRKS_DISABLED');
     var $ena = $('#QUIRKS_ENABLED');
     if (!$dis.length && !$ena.length) return;
@@ -1479,7 +1478,7 @@ function showQuirkInfo() {
 }
 
 function encData() {
-    syncQuirksDisabled();
+    syncQuirks();
     ['MONPASS', 'SLAVEPASS', 'ADMINPASS'].forEach(function (id) {
         $('#' + id).val(nutB64($('#' + id).val()));
     });
@@ -1661,7 +1660,7 @@ $(function() {
     });
     $('#btnTestConn').click(TestConnection);
     $('.nut-quirk-toggle').change(function () {
-        syncQuirksDisabled();
+        syncQuirks();
         $('#QUIRKS_DISABLED, #QUIRKS_ENABLED').trigger('change');
     });
     $('.nut-quirk-info').click(showQuirkInfo);

@@ -457,7 +457,7 @@ function nut_mc_validate(array $c, ?array $usbDevices = null) {
     // nut-batttest starts the test with the NUT Admin account, like the NUT Commands page
     if ($c['BATTTEST'] !== 'disable' && $c['ADMINUSER'] === '') $errors[] = 'Battery Self-Test: set the NUT Admin Username and Password, the test is started with that account.';
     foreach (['QUIRKS_DISABLED', 'QUIRKS_ENABLED'] as $qKey) {
-        if (trim((string)($c[$qKey] ?? '')) !== '' && !preg_match('/^[a-z0-9_]+(?:[\s,]+[a-z0-9_]+)*$/', trim((string)$c[$qKey]))) {
+        if (trim((string)($c[$qKey] ?? '')) !== '' && !preg_match('/^[a-z0-9_]+(?:[ \t,]+[a-z0-9_]+)*$/', trim((string)$c[$qKey]))) {
             $errors[] = 'Hardware Quirks: invalid quirk list.';
         }
     }

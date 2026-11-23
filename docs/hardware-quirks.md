@@ -45,5 +45,5 @@ override.battery.charge.low = 20
 ## Optional / likely workarounds (disabled by default)
 
 - **`apc_onlinedischarge_calibration`** (`usbhid-ups`, NUT 2.8.x, vendor `051d`): adds `onlinedischarge_calibration` for APC models that emit `OL+DISCHRG` during routine self-tests or calibration.
-- **`cyberpower_pollonly`** (`0764`), **`tripplite_pollonly`** (`09ae`), **`eaton_pollonly`** (`0463`) (`usbhid-ups`, all backends): adds `pollonly` for units experiencing USB interrupt pipe disconnects, `EAGAIN` errors, or stale-data loops.
+- **`usbhid_pollonly`** (`usbhid-ups`, all backends, vendors `0764` CyberPower, `09ae` Tripp Lite, `0463` Eaton / MGE): adds `pollonly` for units experiencing USB interrupt pipe disconnects, `EAGAIN` errors, or stale-data loops.
 - **`usbhid_disable_fix_report_desc`** (`usbhid-ups`, NUT 2.8.x, vendors `051d`, `0764`, `050d`, `10af`): adds `disable_fix_report_desc` if a newer firmware revision fixed a bug that NUT's built-in descriptor fix-up still patches, causing skewed readings.
