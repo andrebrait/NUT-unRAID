@@ -1014,7 +1014,7 @@ file_put_contents("$sb/upsc.seq.ups.status", "OL LB\nOL LB\n");
 [$code] = notify_run($sb, 'LOWBATT');
 check($code === 0 && strpos(read_file($sb, 'notify.calls'), 'Event LOWBATT') !== false,
     'persistent OL LB still sends the LOWBATT alert');
-check(file_exists("$sb/lowbatt-hook") && strpos(read_file($sb, 'wall'), 'LOWBATT event') !== false,
+check(wait_for(fn() => file_exists("$sb/lowbatt-hook") && strpos(read_file($sb, 'wall'), 'LOWBATT event') !== false, 5),
     'persistent OL LB still runs the LOWBATT hook and wall');
 
 $sb = sb_new('lowbatt-ob');
