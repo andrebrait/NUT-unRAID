@@ -456,8 +456,10 @@ function nut_mc_validate(array $c, ?array $usbDevices = null) {
     if ($c['BATTTESTUPS'] !== '' && !preg_match(NUT_MC_ID, $c['BATTTESTUPS'])) $errors[] = 'Battery Self-Test UPS: use 1-64 letters, digits, "_", "." or "-".';
     // nut-batttest starts the test with the NUT Admin account, like the NUT Commands page
     if ($c['BATTTEST'] !== 'disable' && $c['ADMINUSER'] === '') $errors[] = 'Battery Self-Test: set the NUT Admin Username and Password, the test is started with that account.';
-    if (trim((string)($c['QUIRKS_DISABLED'] ?? '')) !== '' && !preg_match('/^[a-z0-9_]+(?:[\s,]+[a-z0-9_]+)*$/', trim((string)$c['QUIRKS_DISABLED']))) {
-        $errors[] = 'Hardware Quirks: invalid disabled quirk list.';
+    foreach (['QUIRKS_DISABLED', 'QUIRKS_ENABLED'] as $qKey) {
+        if (trim((string)($c[$qKey] ?? '')) !== '' && !preg_match('/^[a-z0-9_]+(?:[ \t,]+[a-z0-9_]+)*$/', trim((string)$c[$qKey]))) {
+            $errors[] = 'Hardware Quirks: invalid quirk list.';
+        }
     }
     if ($errors) return $errors;
 

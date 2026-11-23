@@ -86,6 +86,7 @@ textarea.nut-custom { width: 100%; max-width: 640px; box-sizing: border-box; fon
 .nut-quirk-item label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: normal; cursor: pointer; }
 .nut-quirk-info { color: var(--nut-muted); font-size: 1.05em; }
 .nut-quirk-info:hover, .nut-quirk-info:focus-visible { color: inherit; }
+.nut-quirk-tag { font-size: 0.85em; color: var(--nut-muted); border: 1px solid var(--nut-border); border-radius: 3px; padding: 0 5px; }
 .nut-quirk-modal { text-align: left; }
 .nut-quirk-modal p { margin: 0 0 8px; }
 .nut-quirk-modal pre { margin: 10px 0 0; padding: 8px 10px; border: 1px solid var(--nut-border); border-radius: 4px; overflow-x: auto; font-family: monospace; }
