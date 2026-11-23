@@ -17,7 +17,6 @@
 const NUT_QUIRKS = [
     'apc_bx_mi_lbrb' => [
         'title'    => 'APC Back-UPS BX...MI: filter spurious LB/RB blips',
-        'summary'  => 'Delays LB (and RB while LB is active) by 4 seconds to filter brief firmware false positives.',
         'details'  => "APC Back-UPS BX-series units (BX750MI, BX950MI, BX1200MI, BX1600MI, BX2200MI) have a known firmware quirk (upstream NUT #2347, #3623) where they briefly flash a false Low Battery (LB) flag over USB HID while online at full charge.\n\nThis workaround adds lbrb_log_delay_sec = 4 and lbrb_log_delay_without_calibrating to ups.conf so usbhid-ups ignores LB (and RB while LB is active) unless it persists for at least 4 seconds.\n\nNotes:\n- A standalone OL RB (Replace Battery without LB) is still reported immediately.\n- With lbrb_log_delay_without_calibrating, a genuine low-battery transition is also delayed by 4 seconds.\n- You can override lbrb_log_delay_sec in Custom ups.conf (UPS section) Directives, or uncheck this workaround to opt out.",
         'drivers'  => ['usbhid-ups'],
         'backends' => ['default', 'preview', 'previous', 'stable'],
@@ -53,7 +52,6 @@ function nut_quirk_usb_devices($sysfs = null) {
         $devices[] = [
             'vendorid'  => nut_quirk_norm_hex($vid),
             'productid' => nut_quirk_norm_hex((string)@file_get_contents("$dir/idProduct")),
-            'vendor'    => trim((string)@file_get_contents("$dir/manufacturer")),
             'model'     => trim((string)@file_get_contents("$dir/product")),
             'serial'    => trim((string)@file_get_contents("$dir/serial")),
         ];
@@ -67,36 +65,41 @@ function nut_quirk_detect_devices(array $c, ?array $usbDevices = null) {
     foreach (nut_mc_parse(nut_mc_custom($c, 'CUSTOM_UPS')) as $d) {
         if ($d['section'] !== null || $d['header'] || $d['error'] || count($d['words']) !== 3 || $d['words'][1] !== '=') continue;
         $k = strtolower($d['words'][0]);
-        if (in_array($k, ['vendorid', 'productid', 'product', 'vendor', 'serial'], true)) {
+        if (in_array($k, ['vendorid', 'productid', 'product', 'serial'], true)) {
             $pinned[$k] = $d['words'][2];
         }
     }
     $pinVid = isset($pinned['vendorid']) ? nut_quirk_norm_hex($pinned['vendorid']) : '';
     $pinPid = isset($pinned['productid']) ? nut_quirk_norm_hex($pinned['productid']) : '';
+    $pinProd = $pinned['product'] ?? '';
     $pinSer = $pinned['serial'] ?? '';
 
     $candidates = [];
-    if (isset($pinned['product'])) {
+    if ($pinProd !== '') {
         $candidates[] = [
             'vendorid'  => $pinVid,
             'productid' => $pinPid,
-            'vendor'    => $pinned['vendor'] ?? '',
-            'model'     => $pinned['product'],
+            'model'     => $pinProd,
             'serial'    => $pinSer,
         ];
     }
     foreach ($usbDevices ?? nut_quirk_usb_devices() as $dev) {
         $vid = nut_quirk_norm_hex($dev['vendorid'] ?? '');
         $pid = nut_quirk_norm_hex($dev['productid'] ?? '');
+        $model = trim((string)($dev['model'] ?? ''));
         $ser = trim((string)($dev['serial'] ?? ''));
         if ($pinVid !== '' && $vid !== $pinVid) continue;
         if ($pinPid !== '' && $pid !== $pinPid) continue;
-        if ($pinSer !== '' && $ser !== '' && $ser !== $pinSer) continue;
+        if ($pinSer !== '' && $ser !== $pinSer) continue;
+        if ($pinProd !== '') {
+            $re = '/' . str_replace('/', '\/', $pinProd) . '/i';
+            $prodMatch = @preg_match($re, $model);
+            if ($prodMatch === 0 || ($prodMatch === false && stripos($model, $pinProd) === false)) continue;
+        }
         $candidates[] = [
             'vendorid'  => $vid,
             'productid' => $pid,
-            'vendor'    => trim((string)($dev['vendor'] ?? '')),
-            'model'     => trim((string)($dev['model'] ?? '')),
+            'model'     => $model,
             'serial'    => $ser,
         ];
     }

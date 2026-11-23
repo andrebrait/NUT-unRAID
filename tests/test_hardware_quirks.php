@@ -56,6 +56,12 @@ check(nut_quirks_matching($pinnedOther, array_merge($bxUsb, $cyberUsb)) === [],
 $pinnedSer = array_merge($defaults, ['CUSTOM_UPS' => $b("serial = \"OTHER999\"\n")]);
 check(nut_quirks_matching($pinnedSer, $bxUsb) === [],
     'pinning another serial in CUSTOM_UPS prevents a different USB APC BX from matching');
+$bxNoSer = [['vendorid' => '051d', 'productid' => '0002', 'model' => 'Back-UPS BX750MI', 'serial' => '']];
+check(nut_quirks_matching($pinnedSer, $bxNoSer) === [],
+    'pinning a serial rejects a USB APC BX with an empty/unreadable serial');
+$pinnedProd = array_merge($defaults, ['CUSTOM_UPS' => $b("vendorid = \"051D\"\nproduct = \"Back-UPS ES 700G\"\n")]);
+check(nut_quirks_matching($pinnedProd, array_merge($bxUsb, $smartUpsUsb)) === [],
+    'pinning another APC product on the same 051d:0002 ID prevents a second USB APC BX from matching');
 
 // 5. Driver, backend, and slave mode gating
 check(nut_quirks_matching(array_merge($defaults, ['DRIVER' => 'nutdrv_qx']), $bxUsb) === [], 'wrong driver does not match');
@@ -71,17 +77,19 @@ $genOut = nut_mc_generate($optedOut, true, $bxUsb);
 check(strpos($genOut['ups.conf'], 'lbrb_log_delay') === false && strpos($genOut['ups.conf'], '# Hardware quirks') === false,
     'opted-out quirk emits no directives in ups.conf');
 check(nut_mc_validate($optedOut, $bxUsb) === [], 'valid QUIRKS_DISABLED passes validation');
+check(nut_mc_validate(array_merge($defaults, ['QUIRKS_DISABLED' => '   ']), $bxUsb) === [],
+    'whitespace-only QUIRKS_DISABLED passes validation');
 check(nut_mc_validate(array_merge($defaults, ['QUIRKS_DISABLED' => 'bad;id']), $bxUsb) !== [],
     'malformed QUIRKS_DISABLED is rejected by validation');
 
 // 7. Custom ups.conf override replaces matching quirk directive without conflict
-$override = array_merge($defaults, ['CUSTOM_UPS' => $b("lbrb_log_delay_sec = 10\n")]);
-check(nut_mc_validate($override, $bxUsb) === [], 'overriding a quirk directive in CUSTOM_UPS is allowed without conflict');
+$override = array_merge($defaults, ['CUSTOM_UPS' => $b("lbrb_log_delay_sec = 10\nlbrb_log_delay_without_calibrating\n")]);
+check(nut_mc_validate($override, $bxUsb) === [], 'overriding quirk directives (including bare flag) in CUSTOM_UPS is allowed without conflict');
 $genOv = nut_mc_generate($override, true, $bxUsb);
 check(strpos($genOv['ups.conf'], 'lbrb_log_delay_sec = 4') === false
     && strpos($genOv['ups.conf'], 'lbrb_log_delay_sec = 10') !== false
-    && strpos($genOv['ups.conf'], "\tlbrb_log_delay_without_calibrating\n") !== false,
-    'custom lbrb_log_delay_sec replaces quirk default while keeping the other quirk flag');
+    && substr_count($genOv['ups.conf'], 'lbrb_log_delay_without_calibrating') === 1,
+    'custom directives replace quirk defaults without duplicating bare flags');
 
 // 8. Settings UI includes per-workaround toggles and info modal triggers
 $page = file_get_contents(__DIR__ . '/../source/nut3/usr/local/emhttp/plugins/nut3/NUTsettings.page');
