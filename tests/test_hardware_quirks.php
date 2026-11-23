@@ -33,11 +33,12 @@ file_put_contents("$sysfs/1-1/idVendor", "051D\n");
 file_put_contents("$sysfs/1-1/idProduct", "0002\n");
 file_put_contents("$sysfs/1-1/product", "Back-UPS BX1600MI\n");
 file_put_contents("$sysfs/1-1/serial", "SER123\n");
+file_put_contents("$sysfs/1-1/busnum", "2\n");
 file_put_contents("$sysfs/1-1:1.0/idVendor", "051D\n");
 $scanned = nut_quirk_usb_devices($sysfs);
 exec('rm -rf ' . escapeshellarg($sysfs));
-check(count($scanned) === 1 && $scanned[0]['vendorid'] === '051d' && $scanned[0]['model'] === 'Back-UPS BX1600MI',
-    'sysfs scan finds USB device, normalizes vendorid, and skips interface subdirs');
+check(count($scanned) === 1 && $scanned[0]['vendorid'] === '051d' && $scanned[0]['model'] === 'Back-UPS BX1600MI' && $scanned[0]['bus'] === '002',
+    'sysfs scan finds USB device, normalizes vendorid and busnum, and skips interface subdirs');
 
 // 2. Exact match (default ON) + related likely matches (default OFF) on APC BX750MI
 $matched = nut_quirks_matching($defaults, $bxUsb);
@@ -111,6 +112,22 @@ $pinnedProd = array_merge($defaults, ['CUSTOM_UPS' => $b("vendorid = \"051D\"\np
 $mPinProd = nut_quirks_matching($pinnedProd, array_merge($bxUsb, $otherBackUpsUsb));
 check(isset($mPinProd['apc_bx_mi_lbrb']) && $mPinProd['apc_bx_mi_lbrb']['default_on'] === false,
     'pinning Back-UPS ES 700G on 051d:0002 prevents a second USB BX750MI from triggering default_on');
+
+// Multi-UPS bus pin and ambiguity downgrade (APC + CyberPower UT attached together)
+$apcBus1 = [['vendorid' => '051d', 'productid' => '0002', 'model' => 'Smart-UPS 1500', 'serial' => 'AS1', 'bus' => '001']];
+$utBus2 = [['vendorid' => '0764', 'productid' => '0501', 'model' => 'UT1500E', 'serial' => 'UT2', 'bus' => '002']];
+$mAmbig = nut_quirks_matching($defaults, array_merge($apcBus1, $utBus2));
+check(isset($mAmbig['cyberpower_ut_onlinedischarge']) && $mAmbig['cyberpower_ut_onlinedischarge']['default_on'] === false,
+    'unpinned multi-UPS host (APC + CyberPower UT) downgrades UT quirk to optional instead of auto-enabling');
+check(nut_quirks_active($defaults, array_merge($apcBus1, $utBus2)) === [],
+    'unpinned multi-UPS host emits no conflicting default-on quirk');
+$pinBus1 = array_merge($defaults, ['CUSTOM_UPS' => $b("bus = \"001\"\n")]);
+check(!isset(nut_quirks_matching($pinBus1, array_merge($apcBus1, $utBus2))['cyberpower_ut_onlinedischarge']),
+    'bus = 001 pin excludes CyberPower UT on bus 002');
+$pinBus2 = array_merge($defaults, ['CUSTOM_UPS' => $b("bus = \"002\"\n")]);
+check(isset(nut_quirks_matching($pinBus2, array_merge($apcBus1, $utBus2))['cyberpower_ut_onlinedischarge'])
+    && nut_quirks_matching($pinBus2, array_merge($apcBus1, $utBus2))['cyberpower_ut_onlinedischarge']['default_on'] === true,
+    'bus = 002 pin unambiguously selects CyberPower UT and enables its quirk by default');
 
 // 8. Driver, backend, and slave mode gating
 check(nut_quirks_matching(array_merge($defaults, ['DRIVER' => 'nutdrv_qx']), $bxUsb) === [], 'wrong driver does not match');

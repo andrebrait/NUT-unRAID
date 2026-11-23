@@ -16,6 +16,8 @@
  */
 
 const NUT_QUIRK_BACKENDS_28 = ['default', 'preview', 'previous', 'stable'];
+// Common USB UPS vendor IDs used to tell when multiple UPSes are attached and ambiguous
+const NUT_QUIRK_UPS_VENDORS = ['051d', '0764', '0463', '09ae', '050d', '10af', '06da', '0665', '0d9f', '047c', '0925'];
 
 const NUT_QUIRKS = [
     'apc_bx_mi_lbrb' => [
@@ -111,11 +113,13 @@ function nut_quirk_usb_devices($sysfs = null) {
         if (strpos(basename($dir), ':') !== false) continue;
         $vid = @file_get_contents("$dir/idVendor");
         if ($vid === false) continue;
+        $busRaw = trim((string)@file_get_contents("$dir/busnum"));
         $devices[] = [
             'vendorid'  => nut_quirk_norm_hex($vid),
             'productid' => nut_quirk_norm_hex((string)@file_get_contents("$dir/idProduct")),
             'model'     => trim((string)@file_get_contents("$dir/product")),
             'serial'    => trim((string)@file_get_contents("$dir/serial")),
+            'bus'       => ctype_digit($busRaw) ? sprintf('%03d', (int)$busRaw) : '',
         ];
     }
     return $devices;
@@ -127,7 +131,7 @@ function nut_quirk_detect_devices(array $c, ?array $usbDevices = null) {
     foreach (nut_mc_parse(nut_mc_custom($c, 'CUSTOM_UPS')) as $d) {
         if ($d['section'] !== null || $d['header'] || $d['error'] || count($d['words']) !== 3 || $d['words'][1] !== '=') continue;
         $k = strtolower($d['words'][0]);
-        if (in_array($k, ['vendorid', 'productid', 'product', 'serial'], true)) {
+        if (in_array($k, ['vendorid', 'productid', 'product', 'serial', 'bus'], true)) {
             $pinned[$k] = $d['words'][2];
         }
     }
@@ -135,6 +139,8 @@ function nut_quirk_detect_devices(array $c, ?array $usbDevices = null) {
     $pinPid = isset($pinned['productid']) ? nut_quirk_norm_hex($pinned['productid']) : '';
     $pinProd = $pinned['product'] ?? '';
     $pinSer = $pinned['serial'] ?? '';
+    $pinBusRaw = trim((string)($pinned['bus'] ?? ''));
+    $pinBus = ctype_digit($pinBusRaw) ? sprintf('%03d', (int)$pinBusRaw) : $pinBusRaw;
 
     $candidates = [];
     if ($pinProd !== '') {
@@ -143,6 +149,7 @@ function nut_quirk_detect_devices(array $c, ?array $usbDevices = null) {
             'productid' => $pinPid,
             'model'     => $pinProd,
             'serial'    => $pinSer,
+            'bus'       => $pinBus,
         ];
     }
     foreach ($usbDevices ?? nut_quirk_usb_devices() as $dev) {
@@ -150,9 +157,12 @@ function nut_quirk_detect_devices(array $c, ?array $usbDevices = null) {
         $pid = nut_quirk_norm_hex($dev['productid'] ?? '');
         $model = trim((string)($dev['model'] ?? ''));
         $ser = trim((string)($dev['serial'] ?? ''));
+        $busRaw = trim((string)($dev['bus'] ?? ''));
+        $bus = ctype_digit($busRaw) ? sprintf('%03d', (int)$busRaw) : $busRaw;
         if ($pinVid !== '' && $vid !== $pinVid) continue;
         if ($pinPid !== '' && $pid !== $pinPid) continue;
         if ($pinSer !== '' && $ser !== $pinSer) continue;
+        if ($pinBus !== '' && $bus !== $pinBus) continue;
         if ($pinProd !== '') {
             $re = '/' . str_replace('/', '\/', $pinProd) . '/i';
             $prodMatch = @preg_match($re, $model);
@@ -163,6 +173,7 @@ function nut_quirk_detect_devices(array $c, ?array $usbDevices = null) {
             'productid' => $pid,
             'model'     => $model,
             'serial'    => $ser,
+            'bus'       => $bus,
         ];
     }
     return $candidates;
@@ -198,6 +209,7 @@ function nut_quirks_matching(array $c, ?array $usbDevices = null) {
     $backend = ($c['BACKEND'] ?? '') !== '' ? $c['BACKEND'] : 'default';
     $devices = nut_quirk_detect_devices($c, $usbDevices);
     if (!$devices) return [];
+    $upsDevices = array_values(array_filter($devices, fn($d) => in_array($d['vendorid'], NUT_QUIRK_UPS_VENDORS, true)));
     $matched = [];
     foreach (NUT_QUIRKS as $id => $q) {
         if (!in_array($driver, $q['drivers'], true)) continue;
@@ -207,14 +219,23 @@ function nut_quirks_matching(array $c, ?array $usbDevices = null) {
         foreach ($devices as $dev) {
             if (!empty($q['match']) && nut_quirk_matches_device($q['match'], $dev)) {
                 $exact = true;
-                break;
-            }
-            if (!empty($q['likely_match']) && nut_quirk_matches_device($q['likely_match'], $dev)) {
+            } elseif (!empty($q['likely_match']) && nut_quirk_matches_device($q['likely_match'], $dev)) {
                 $likely = true;
             }
         }
         if ($exact || $likely) {
-            $matched[$id] = $q + ['default_on' => $exact];
+            // Only auto-enable an exact workaround when no other candidate UPS disagrees (avoids applying
+            // e.g. CyberPower's onlinedischarge_onbattery to an unpinned APC on a multi-UPS host).
+            $unambiguous = $exact;
+            if ($exact && count($upsDevices) > 1) {
+                foreach ($upsDevices as $u) {
+                    if (!nut_quirk_matches_device($q['match'], $u)) {
+                        $unambiguous = false;
+                        break;
+                    }
+                }
+            }
+            $matched[$id] = $q + ['default_on' => $unambiguous];
         }
     }
     return $matched;
