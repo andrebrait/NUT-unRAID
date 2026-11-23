@@ -16,8 +16,12 @@
  */
 
 const NUT_QUIRK_BACKENDS_28 = ['default', 'preview', 'previous', 'stable'];
-// Common USB UPS vendor IDs used to tell when multiple UPSes are attached and ambiguous
-const NUT_QUIRK_UPS_VENDORS = ['051d', '0764', '0463', '09ae', '050d', '10af', '06da', '0665', '0d9f', '047c', '0925'];
+// USB UPS vendor IDs from NUT's 62-nut-usbups.rules (usbhid-ups + common USB UPSes) for multi-UPS ambiguity checks
+const NUT_QUIRK_UPS_VENDORS = [
+    '03f0', '0463', '047c', '0483', '04d8', '050d', '051d', '0592',
+    '05dd', '0665', '06da', '075d', '0764', '0925', '09ae', '0d9f',
+    '10af', '1cb0', '2341', '2a03', '2e51', '2e66', '3746', '4234',
+];
 
 const NUT_QUIRKS = [
     'apc_bx_mi_lbrb' => [

@@ -128,6 +128,10 @@ $pinBus2 = array_merge($defaults, ['CUSTOM_UPS' => $b("bus = \"002\"\n")]);
 check(isset(nut_quirks_matching($pinBus2, array_merge($apcBus1, $utBus2))['cyberpower_ut_onlinedischarge'])
     && nut_quirks_matching($pinBus2, array_merge($apcBus1, $utBus2))['cyberpower_ut_onlinedischarge']['default_on'] === true,
     'bus = 002 pin unambiguously selects CyberPower UT and enables its quirk by default');
+$powervar = [['vendorid' => '4234', 'productid' => '0002', 'model' => 'Powervar UPS', 'serial' => 'PV1', 'bus' => '001']];
+$mPvAmbig = nut_quirks_matching($defaults, array_merge($powervar, $utBus2));
+check(isset($mPvAmbig['cyberpower_ut_onlinedischarge']) && $mPvAmbig['cyberpower_ut_onlinedischarge']['default_on'] === false,
+    'unpinned Powervar 4234:0002 + CyberPower UT also downgrades UT quirk to optional');
 
 // 8. Driver, backend, and slave mode gating
 check(nut_quirks_matching(array_merge($defaults, ['DRIVER' => 'nutdrv_qx']), $bxUsb) === [], 'wrong driver does not match');
