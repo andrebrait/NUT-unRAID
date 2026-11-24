@@ -45,8 +45,8 @@ if [ -n "$list" ]; then
 fi
 case "$1" in
     *@refused*) echo "Error: Connection failure: <b>refused</b>" >&2; exit 1 ;;
-    *@unkhost*) echo "Error: Unknown host" >&2; exit 1 ;;
-    *:99999) echo "Error: Invalid port" >&2; exit 1 ;;
+    *@unkhost*) echo "Error: No such host" >&2; exit 1 ;;
+    *:99999) echo "Error: invalid UPS definition." >&2; exit 1 ;;
     *@silent*) exit 124 ;;
     missing@*) echo "Error: Unknown UPS" >&2; exit 1 ;;
     denied@*) echo "Error: Access denied" >&2; exit 1 ;;
@@ -106,12 +106,12 @@ check($html === '<ul><li class="nut-fail">Could not reach the NUT server at refu
     'connection test output is a list of classed items');
 
 $res = nut_testconn('unkhost.lan', 'ups');
-check($res['ok'] === false && $res['lines'] === [['fail', 'Could not reach the NUT server at unkhost.lan: Error: Unknown host']],
+check($res['ok'] === false && $res['lines'] === [['fail', 'Could not reach the NUT server at unkhost.lan: Error: No such host']],
     'connection test reports unknown host as unreachable: ' . json_encode($res['lines']));
 
 @unlink("$tmp/calls");
 $res = nut_testconn('nas.local:99999', 'ups');
-check($res['ok'] === false && $res['lines'] === [['fail', 'Could not reach the NUT server at nas.local:99999: Error: Invalid port']],
+check($res['ok'] === false && $res['lines'] === [['fail', 'Could not reach the NUT server at nas.local:99999: Error: invalid UPS definition.']],
     'connection test reports invalid port as unreachable: ' . json_encode($res['lines']));
 check(file_get_contents("$tmp/calls") === "-- ups@nas.local:99999 ups.status\n",
     'transport errors do not fall back to upsc -l');

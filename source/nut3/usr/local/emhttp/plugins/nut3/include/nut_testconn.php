@@ -70,7 +70,7 @@ function nut_testconn($host, $name) {
         return $res;
     }
     if ($code === 124 || $code === 137) { $res['lines'][] = ['fail', "No response from $host within 5 seconds."]; return $res; }
-    if ($code >= 125 || preg_match('/Connection failure|Unknown host|Invalid port|Server disconnected|Read failure|Write failure|SSL/i', $err) === 1) {
+    if ($code >= 125 || preg_match('/Connection failure|No such host|invalid UPS definition|Send failure|Receive failure|socket failure|Write error|Read error|Server disconnected|SSL/i', $err) === 1) {
         $res['lines'][] = ['fail', "Could not reach the NUT server at $host" . ($err !== '' ? ": $err" : '.')];
         return $res;
     }
