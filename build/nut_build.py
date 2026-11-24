@@ -181,7 +181,7 @@ def verify(args):
             _, output = check(root, forbidden["command"])
             print(f"== {' '.join(forbidden['command'])}\n{output}", end="")
             failures.extend(f"{forbidden['command'][0]} printed {pattern!r}" for pattern in forbidden["patterns"] if pattern in output)
-        for fix in LOCK["fixes"]:
+        for fix in [*LOCK["fixes"], *LOCK.get("local_patches", [])]:
             if "binary" in fix:
                 if fix["binary_marker"].encode() not in (root / fix["binary"]).read_bytes():
                     failures.append(fix["binary"])

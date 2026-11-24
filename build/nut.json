@@ -2,7 +2,7 @@
   "package": {
     "name": "nut",
     "version": "2.8.5.1711_g1c4ab78c6",
-    "build": "2",
+    "build": "3",
     "tag": "_andrebrait"
   },
   "nut": {
@@ -43,6 +43,14 @@
       "merge": "b77408307ce618b9d4f0057ae7ad8c12bf18acb6",
       "source": "drivers/blazer_usb.c",
       "marker": "\tmemset(tmp, 0, sizeof(tmp));\n\tsnprintf(tmp, sizeof(tmp), \"%s\", cmd);"
+    }
+  ],
+  "local_patches": [
+    {
+      "id": "Allow non-standard PROTVER replies (e.g. UniFi UPS 'OK 1') on active STARTTLS sessions (andrebrait/NUT-unRAID#11)",
+      "file": "build/recipes/nut/0001-upsclient-starttls-protver.patch",
+      "binary": "usr/lib64/libupsclient.so.7",
+      "binary_marker": "STARTTLS session is active, continuing with unrecognized protocol version reply"
     }
   ],
   "runtime_packages": [
