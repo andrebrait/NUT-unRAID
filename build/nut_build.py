@@ -91,6 +91,16 @@ def build(args):
         shutil.copytree(REPO / "build/recipes/nut", recipe)
         for item, path in inputs.values():
             shutil.copyfile(path, recipe / item["file"])
+        patches = LOCK.get("local_patches", [])
+        if patches:
+            src = root / "work/src"
+            src.mkdir(parents=True)
+            run(["tar", "--no-same-owner", "-xzf", str(inputs["nut"][1]), "-C", str(src), "--strip-components=1"])
+            for p in patches:
+                patch_file = REPO / p["file"]
+                print(f"applying local patch: {p['file']}")
+                run(["patch", "-d", str(src), "-p1", "--fuzz=0", "-i", str(patch_file)])
+            environment["NUT_SRC"] = "/work/src"
         (root / "out").mkdir()
         with mapped_root(root):
             run_sandbox(root, ["/bin/bash", "nut.SlackBuild"], environment, cwd="/work/recipe", timeout=7200)

@@ -19,53 +19,16 @@ AVAHI=$TMP/avahi-include
 
 rm -rf "$TMP"
 mkdir -p "$PKG" "$SRC" "$AVAHI" "$OUTPUT"
-tar --no-same-owner -xzf "$CWD/$NUT_TARBALL" -C "$SRC" --strip-components=1
+if [ -n "${NUT_SRC:-}" ]; then
+  cp -a "$NUT_SRC/." "$SRC/"
+else
+  tar --no-same-owner -xzf "$CWD/$NUT_TARBALL" -C "$SRC" --strip-components=1
+fi
 # Unraid ships the avahi libraries without headers; nut-scanner dlopen()s them at runtime.
 tar --no-same-owner -xzf "$CWD/$AVAHI_TARBALL" -C "$AVAHI" --strip-components=1 \
   --wildcards '*/avahi-common/*.h' '*/avahi-client/*.h'
 
 cd "$SRC"
-for p in "$CWD"/*.patch; do
-  [ -e "$p" ] || continue
-  echo "Applying patch: $(basename "$p")"
-  if command -v patch >/dev/null 2>&1; then
-    patch -p1 --fuzz=0 < "$p"
-  else
-    python3 - "$p" <<'PY'
-import re, sys
-from pathlib import Path
-lines = Path(sys.argv[1]).read_text().splitlines(keepends=True)
-i = 0
-while i < len(lines):
-    if lines[i].startswith("--- ") and i + 1 < len(lines) and lines[i + 1].startswith("+++ "):
-        target = Path(lines[i + 1][4:].split("\t", 1)[0].strip().removeprefix("b/"))
-        src = target.read_text().splitlines(keepends=True)
-        out, pos = [], 0
-        i += 2
-        while i < len(lines) and lines[i].startswith("@@ "):
-            m = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", lines[i])
-            old_start = int(m.group(1)) - 1
-            out.extend(src[pos:old_start])
-            pos = old_start
-            i += 1
-            while i < len(lines) and not lines[i].startswith(("@@ ", "--- ")):
-                tag, body = lines[i][0], lines[i][1:]
-                if tag == " ":
-                    assert src[pos] == body, f"context mismatch in {target} at line {pos + 1}"
-                    out.append(src[pos]); pos += 1
-                elif tag == "-":
-                    assert src[pos] == body, f"delete mismatch in {target} at line {pos + 1}"
-                    pos += 1
-                elif tag == "+":
-                    out.append(body)
-                i += 1
-        out.extend(src[pos:])
-        target.write_text("".join(out))
-    else:
-        i += 1
-PY
-  fi
-done
 export NUT_VERSION_FORCED NUT_VERSION_FORCED_SEMVER=2.8.5
 ./autogen.sh
 

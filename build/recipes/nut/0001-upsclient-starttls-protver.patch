@@ -1,6 +1,6 @@
 --- a/clients/upsclient.c
 +++ b/clients/upsclient.c
-@@ -2795,12 +2795,19 @@
+@@ -2795,12 +2795,21 @@
  	 * report its fault to the client when connection
  	 * is half-way secure):
  	 */
@@ -14,7 +14,7 @@
 +		int	ver_ok;
 +		ups->upserror = 0;
 +		ver_ok = upscli_is_valid_protocol_version(ups, NULL);
-+		if (ver_ok < 0 && ups->upserror != 0) {
++		if (ups->upserror != 0) {
 +			upslogx(LOG_WARNING, "%s: STARTTLS setup claimed to succeed, but protocol version check in the secured session failed, and SSL is required", __func__);
 +			ups->ssl = NULL;
 +			/* Reaction to forceSSL etc. is up to the caller */
@@ -22,18 +22,9 @@
 +			return -2;
 +		} else if (ver_ok == 0) {
 +			upsdebugx(1, "%s: STARTTLS session is active, continuing with unrecognized protocol version reply", __func__);
++		} else if (ver_ok < 0) {
++			upsdebugx(1, "%s: STARTTLS session is active, server rejected PROTVER/NETVER without transport error", __func__);
 +		}
  	}
  
  	return 1;
-@@ -3663,8 +3670,8 @@
- 	}
- 
- 	len = strlen(version);
--	if (len > 0 && version[len-1] == '\n') {
--		version[len-1] = '\0';
-+	while (len > 0 && (version[len-1] == '\n' || version[len-1] == '\r')) {
-+		version[--len] = '\0';
- 	}
- 
- 	upsdebugx(3, "%s: PROTVER or NETVER returned '%s', matching against '%s'",
