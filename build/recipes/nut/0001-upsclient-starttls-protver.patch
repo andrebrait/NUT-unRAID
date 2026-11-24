@@ -1,6 +1,6 @@
 --- a/clients/upsclient.c
 +++ b/clients/upsclient.c
-@@ -2795,12 +2795,21 @@
+@@ -2795,12 +2795,19 @@
  	 * report its fault to the client when connection
  	 * is half-way secure):
  	 */
@@ -16,9 +16,7 @@
 +		ver_ok = upscli_is_valid_protocol_version(ups, NULL);
 +		if (ups->upserror != 0) {
 +			upslogx(LOG_WARNING, "%s: STARTTLS setup claimed to succeed, but protocol version check in the secured session failed, and SSL is required", __func__);
-+			ups->ssl = NULL;
-+			/* Reaction to forceSSL etc. is up to the caller */
-+			/* TODO: Should caller drop SSL context or restart the connection as plaintext if SSL is not required? */
++			/* Keep ups->ssl intact so upscli_disconnect() shuts down and frees it. */
 +			return -2;
 +		} else if (ver_ok == 0) {
 +			upsdebugx(1, "%s: STARTTLS session is active, continuing with unrecognized protocol version reply", __func__);
