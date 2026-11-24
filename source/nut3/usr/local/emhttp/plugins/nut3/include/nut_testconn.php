@@ -55,26 +55,41 @@ function nut_testconn($host, $name) {
     if (!nut_testconn_valid_host($host)) { $res['lines'][] = ['fail', 'Invalid host: use a hostname, IPv4 or IPv6 address (optionally with :port).']; return $res; }
     if (!nut_testconn_valid_name($name)) { $res['lines'][] = ['fail', 'Invalid UPS name: use only letters, digits, dot, underscore and dash.']; return $res; }
 
-    [$code, $list, $err] = nut_testconn_run(NUT_TEST_UPSC . '-l -- ' . escapeshellarg($host));
-    if ($code === 124) { $res['lines'][] = ['fail', "No response from $host within 5 seconds."]; return $res; }
-    if ($code !== 0) { $res['lines'][] = ['fail', "Could not reach the NUT server at $host" . ($err !== '' ? ": $err" : '.')]; return $res; }
-    $res['lines'][] = ['ok', "NUT server at $host is reachable."];
-
-    // upsc -l prints "name" or "name: description"
-    $names = array_map(function ($l) { return trim(explode(':', $l, 2)[0]); }, $list);
-    if (!in_array($name, $names, true)) {
-        $res['lines'][] = ['fail', "UPS \"$name\" was not found on that server." . ($names ? ' Available: ' . implode(', ', $names) . '.' : '')];
-        return $res;
-    }
-    $res['lines'][] = ['ok', "UPS \"$name\" exists."];
-
+    /* Query ups.status directly first: some embedded NUT servers (e.g. UniFi UPS) do not implement LIST UPS
+     * (`upsc -l`) and hang or fail on it, even though direct GET VAR works. Fall back to `upsc -l` only when
+     * ups.status fails, to list available UPS names on servers that support it. */
     [$code, $st, $err] = nut_testconn_run(NUT_TEST_UPSC . '-- ' . escapeshellarg($name . '@' . $host) . ' ups.status');
     if ($code === 0 && $st) {
         $res['ok'] = true;
+        $res['lines'][] = ['ok', "NUT server at $host is reachable."];
+        $res['lines'][] = ['ok', "UPS \"$name\" exists."];
         $res['lines'][] = ['ok', 'Status: ' . $st[0]];
-    } else {
-        $res['lines'][] = ['fail', 'Could not read ups.status' . ($err !== '' ? ": $err" : '.')];
+        $res['lines'][] = ['note', 'Note: the monitor username and password are not checked by this test (upsc does not log in).'];
+        return $res;
     }
+    if ($code === 124 || $code === 137) { $res['lines'][] = ['fail', "No response from $host within 5 seconds."]; return $res; }
+    if ($code === 127 || stripos($err, 'Connection failure') !== false || stripos($err, 'Unknown host') !== false) {
+        $res['lines'][] = ['fail', "Could not reach the NUT server at $host" . ($err !== '' ? ": $err" : '.')];
+        return $res;
+    }
+
+    [$lcode, $list] = nut_testconn_run(NUT_TEST_UPSC . '-l -- ' . escapeshellarg($host));
+    if ($lcode === 0) {
+        $res['lines'][] = ['ok', "NUT server at $host is reachable."];
+        // upsc -l prints "name" or "name: description"
+        $names = array_map(function ($l) { return trim(explode(':', $l, 2)[0]); }, $list);
+        if (!in_array($name, $names, true)) {
+            $res['lines'][] = ['fail', "UPS \"$name\" was not found on that server." . ($names ? ' Available: ' . implode(', ', $names) . '.' : '')];
+            return $res;
+        }
+        $res['lines'][] = ['ok', "UPS \"$name\" exists."];
+    } elseif (stripos($err, 'Unknown UPS') !== false) {
+        $res['lines'][] = ['ok', "NUT server at $host is reachable."];
+        $res['lines'][] = ['fail', "UPS \"$name\" was not found on that server."];
+        return $res;
+    }
+
+    $res['lines'][] = ['fail', 'Could not read ups.status' . ($err !== '' ? ": $err" : '.')];
     $res['lines'][] = ['note', 'Note: the monitor username and password are not checked by this test (upsc does not log in).'];
     return $res;
 }

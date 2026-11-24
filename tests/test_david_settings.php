@@ -37,14 +37,19 @@ done
 if [ -n "$list" ]; then
     case "$1" in
         refused*) echo "Error: Connection failure: <b>refused</b>" >&2; exit 1 ;;
-        silent*) exit 124 ;;
+        silent*|unifi*) exit 124 ;;
         dash*) printf -- '-dash\nups\n'; exit 0 ;;
     esac
-    printf 'ups\nrack: Rack UPS\n'
+    printf 'ups\nrack: Rack UPS\nknown-nostatus\n'
     exit 0
 fi
 case "$1" in
-    nostatus@*) echo "Error: Variable not supported by UPS" >&2; exit 1 ;;
+    *@refused*) echo "Error: Connection failure: <b>refused</b>" >&2; exit 1 ;;
+    *@unkhost*) echo "Error: Unknown host" >&2; exit 1 ;;
+    *@silent*) exit 124 ;;
+    missing@*) echo "Error: Unknown UPS" >&2; exit 1 ;;
+    denied@*) echo "Error: Access denied" >&2; exit 1 ;;
+    nostatus@*|known-nostatus@*) echo "Error: Variable not supported by UPS" >&2; exit 1 ;;
 esac
 echo "OL CHRG"
 SH);
@@ -57,12 +62,38 @@ check($res['ok'] === true, 'connection test passes for a reachable server with a
 check(in_array(['ok', 'Status: OL CHRG'], $res['lines'], true), 'connection test shows the UPS status');
 check(end($res['lines'])[0] === 'note', 'connection test says the monitor credentials are not checked');
 
+// UniFi-style embedded NUT server: LIST UPS (`upsc -l`) hangs/times out, direct GET VAR works
+@unlink("$tmp/calls");
+$res = nut_testconn('unifi.lan:3493', 'ups');
+check($res['ok'] === true && in_array(['ok', 'Status: OL CHRG'], $res['lines'], true),
+    'connection test succeeds when upsc -l would time out but direct ups.status works: ' . json_encode($res['lines']));
+check(file_get_contents("$tmp/calls") === "-- ups@unifi.lan:3493 ups.status\n",
+    'direct ups.status success never calls upsc -l');
+
+$res = nut_testconn('unifi.lan:3493', 'missing');
+check($res['ok'] === false && $res['lines'] === [
+    ['ok', 'NUT server at unifi.lan:3493 is reachable.'],
+    ['fail', 'UPS "missing" was not found on that server.'],
+], 'connection test reports unknown UPS cleanly when upsc -l times out: ' . json_encode($res['lines']));
+
+$res = nut_testconn('unifi.lan:3493', 'denied');
+check($res['ok'] === false
+    && in_array(['fail', 'Could not read ups.status: Error: Access denied'], $res['lines'], true)
+    && end($res['lines'])[0] === 'note',
+    'connection test surfaces ups.status errors such as Access denied when upsc -l times out: ' . json_encode($res['lines']));
+
 $res = nut_testconn('nas.local', 'missing');
-check($res['ok'] === false && in_array(['fail', 'UPS "missing" was not found on that server. Available: ups, rack.'], $res['lines'], true),
+check($res['ok'] === false && in_array(['fail', 'UPS "missing" was not found on that server. Available: ups, rack, known-nostatus.'], $res['lines'], true),
     'connection test lists the UPSes of the server when the name does not exist');
 
 $res = nut_testconn('nas.local', 'nostatus');
 check($res['ok'] === false, 'connection test fails when the UPS name is unknown even if the server answers');
+
+$res = nut_testconn('nas.local', 'known-nostatus');
+check($res['ok'] === false
+    && in_array(['ok', 'UPS "known-nostatus" exists.'], $res['lines'], true)
+    && in_array(['fail', 'Could not read ups.status: Error: Variable not supported by UPS'], $res['lines'], true),
+    'connection test distinguishes an existing UPS whose ups.status failed: ' . json_encode($res['lines']));
 
 $res = nut_testconn('refused.lan', 'ups');
 check($res['ok'] === false && $res['lines'][0][0] === 'fail' && strpos($res['lines'][0][1], 'Connection failure') !== false,
@@ -71,6 +102,10 @@ $html = nut_testconn_html($res);
 check(strpos($html, '<b>') === false && strpos($html, '&lt;b&gt;refused&lt;/b&gt;') !== false, 'connection test output is HTML-escaped');
 check($html === '<ul><li class="nut-fail">Could not reach the NUT server at refused.lan: Error: Connection failure: &lt;b&gt;refused&lt;/b&gt;</li></ul>',
     'connection test output is a list of classed items');
+
+$res = nut_testconn('unkhost.lan', 'ups');
+check($res['ok'] === false && $res['lines'] === [['fail', 'Could not reach the NUT server at unkhost.lan: Error: Unknown host']],
+    'connection test reports unknown host as unreachable: ' . json_encode($res['lines']));
 
 $res = nut_testconn('silent.lan', 'ups');
 check($res['lines'][0] === ['fail', 'No response from silent.lan within 5 seconds.'], 'connection test reports a timeout');
@@ -91,14 +126,19 @@ check(nut_testconn_valid_host(['nas']) === false && nut_testconn_valid_name(['up
 @unlink("$tmp/calls");
 $res = nut_testconn('dash.lan', '-dash');
 check($res['ok'] === true && in_array(['ok', 'Status: OL CHRG'], $res['lines'], true), 'connection test reaches a UPS whose name starts with a dash: ' . json_encode($res['lines']));
-check(file_get_contents("$tmp/calls") === "-l -- dash.lan\n-- -dash@dash.lan ups.status\n", 'both upsc calls end their options before the host and the UPS');
+check(file_get_contents("$tmp/calls") === "-- -dash@dash.lan ups.status\n", 'upsc ends its options before the UPS');
+// when ups.status fails, the fallback upsc -l call also ends its options before the host
+@unlink("$tmp/calls");
+$res = nut_testconn('dash.lan', 'missing');
+check($res['ok'] === false && file_get_contents("$tmp/calls") === "-- missing@dash.lan ups.status\n-l -- dash.lan\n",
+    'both upsc calls end their options before the UPS and the host');
 // a fully qualified hostname keeps its trailing dot all the way to upsc
 @unlink("$tmp/calls");
 foreach (['nas.local.', 'nas.local.:3493'] as $host) {
     $res = nut_testconn($host, 'rack');
     check($res['ok'] === true, "connection test passes for the fully qualified host $host: " . json_encode($res['lines']));
 }
-check(file_get_contents("$tmp/calls") === "-l -- nas.local.\n-- rack@nas.local. ups.status\n-l -- nas.local.:3493\n-- rack@nas.local.:3493 ups.status\n",
+check(file_get_contents("$tmp/calls") === "-- rack@nas.local. ups.status\n-- rack@nas.local.:3493 ups.status\n",
     'the trailing dot and the port reach upsc as given');
 
 // ---- POST only: the webGui checks the CSRF token of every POST, so a GET from another site must not probe a host ---
