@@ -99,7 +99,7 @@ def build(args):
             for p in patches:
                 patch_file = REPO / p["file"]
                 print(f"applying local patch: {p['file']}")
-                run(["patch", "-d", str(src), "-p1", "--fuzz=0", "-i", str(patch_file)])
+                run(["patch", "--batch", "--forward", "-d", str(src), "-p1", "--fuzz=0", "-i", str(patch_file)])
             environment["NUT_SRC"] = "/work/src"
         (root / "out").mkdir()
         with mapped_root(root):
