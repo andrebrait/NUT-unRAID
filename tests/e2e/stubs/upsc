@@ -15,6 +15,10 @@ if [ "$1" = -l ]; then
     exit 0
 fi
 [ "$1" = -- ] && shift
+if [ "${1%%@*}" != ups ]; then
+    echo "Error: Unknown UPS" >&2
+    exit 1
+fi
 if [ -n "$2" ]; then
     awk -v var="$2" 'index($0, var ": ") == 1 { print substr($0, length(var) + 3); found = 1; exit } END { exit !found }' "$data/upsc.txt" && exit 0
     echo "Error: Variable not supported by UPS" >&2
