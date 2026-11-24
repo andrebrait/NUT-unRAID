@@ -36,8 +36,8 @@ while [ $# -gt 0 ]; do
 done
 if [ -n "$list" ]; then
     case "$1" in
-        refused*) echo "Error: Connection failure: <b>refused</b>" >&2; exit 1 ;;
-        silent*|unifi*) exit 124 ;;
+        unifi*) exit 124 ;;
+        emptylist*) exit 0 ;;
         dash*) printf -- '-dash\nups\n'; exit 0 ;;
     esac
     printf 'ups\nrack: Rack UPS\nknown-nostatus\n'
@@ -46,9 +46,11 @@ fi
 case "$1" in
     *@refused*) echo "Error: Connection failure: <b>refused</b>" >&2; exit 1 ;;
     *@unkhost*) echo "Error: Unknown host" >&2; exit 1 ;;
+    *:99999) echo "Error: Invalid port" >&2; exit 1 ;;
     *@silent*) exit 124 ;;
     missing@*) echo "Error: Unknown UPS" >&2; exit 1 ;;
     denied@*) echo "Error: Access denied" >&2; exit 1 ;;
+    stale@*) echo "Error: Data stale" >&2; exit 1 ;;
     nostatus@*|known-nostatus@*) echo "Error: Variable not supported by UPS" >&2; exit 1 ;;
 esac
 echo "OL CHRG"
@@ -106,6 +108,19 @@ check($html === '<ul><li class="nut-fail">Could not reach the NUT server at refu
 $res = nut_testconn('unkhost.lan', 'ups');
 check($res['ok'] === false && $res['lines'] === [['fail', 'Could not reach the NUT server at unkhost.lan: Error: Unknown host']],
     'connection test reports unknown host as unreachable: ' . json_encode($res['lines']));
+
+@unlink("$tmp/calls");
+$res = nut_testconn('nas.local:99999', 'ups');
+check($res['ok'] === false && $res['lines'] === [['fail', 'Could not reach the NUT server at nas.local:99999: Error: Invalid port']],
+    'connection test reports invalid port as unreachable: ' . json_encode($res['lines']));
+check(file_get_contents("$tmp/calls") === "-- ups@nas.local:99999 ups.status\n",
+    'transport errors do not fall back to upsc -l');
+
+$res = nut_testconn('emptylist.lan', 'stale');
+check($res['ok'] === false
+    && in_array(['fail', 'Could not read ups.status: Error: Data stale'], $res['lines'], true)
+    && !in_array(['fail', 'UPS "stale" was not found on that server.'], $res['lines'], true),
+    'empty upsc -l output does not mask real ups.status errors as not found: ' . json_encode($res['lines']));
 
 $res = nut_testconn('silent.lan', 'ups');
 check($res['lines'][0] === ['fail', 'No response from silent.lan within 5 seconds.'], 'connection test reports a timeout');
