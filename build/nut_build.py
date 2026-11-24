@@ -91,6 +91,16 @@ def build(args):
         shutil.copytree(REPO / "build/recipes/nut", recipe)
         for item, path in inputs.values():
             shutil.copyfile(path, recipe / item["file"])
+        patches = LOCK.get("local_patches", [])
+        if patches:
+            src = root / "work/src"
+            src.mkdir(parents=True)
+            run(["tar", "--no-same-owner", "-xzf", str(inputs["nut"][1]), "-C", str(src), "--strip-components=1"])
+            for p in patches:
+                patch_file = REPO / p["file"]
+                print(f"applying local patch: {p['file']}")
+                run(["patch", "--batch", "--forward", "-d", str(src), "-p1", "--fuzz=0", "-i", str(patch_file)])
+            environment["NUT_SRC"] = "/work/src"
         (root / "out").mkdir()
         with mapped_root(root):
             run_sandbox(root, ["/bin/bash", "nut.SlackBuild"], environment, cwd="/work/recipe", timeout=7200)
@@ -181,7 +191,7 @@ def verify(args):
             _, output = check(root, forbidden["command"])
             print(f"== {' '.join(forbidden['command'])}\n{output}", end="")
             failures.extend(f"{forbidden['command'][0]} printed {pattern!r}" for pattern in forbidden["patterns"] if pattern in output)
-        for fix in LOCK["fixes"]:
+        for fix in [*LOCK["fixes"], *LOCK.get("local_patches", [])]:
             if "binary" in fix:
                 if fix["binary_marker"].encode() not in (root / fix["binary"]).read_bytes():
                     failures.append(fix["binary"])

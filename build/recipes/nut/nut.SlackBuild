@@ -19,7 +19,11 @@ AVAHI=$TMP/avahi-include
 
 rm -rf "$TMP"
 mkdir -p "$PKG" "$SRC" "$AVAHI" "$OUTPUT"
-tar --no-same-owner -xzf "$CWD/$NUT_TARBALL" -C "$SRC" --strip-components=1
+if [ -n "${NUT_SRC:-}" ]; then
+  cp -a "$NUT_SRC/." "$SRC/"
+else
+  tar --no-same-owner -xzf "$CWD/$NUT_TARBALL" -C "$SRC" --strip-components=1
+fi
 # Unraid ships the avahi libraries without headers; nut-scanner dlopen()s them at runtime.
 tar --no-same-owner -xzf "$CWD/$AVAHI_TARBALL" -C "$AVAHI" --strip-components=1 \
   --wildcards '*/avahi-common/*.h' '*/avahi-client/*.h'
